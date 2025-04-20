@@ -464,6 +464,59 @@ class InternVideo2(nn.Module):
     def dtype(self):
         return self.patch_embed.proj.weight.dtype
 
+    # ─── ADD THIS ──────────────────────────────────────────────────────────────
+    def patchify_frames(self, x: torch.Tensor):
+        """
+        Input x: [B, C, T, H, W]
+        Returns token tensor [B, 1+T*L, C] (including cls token if you like)
+        """
+        # 1) spatial patch embedding
+        x = self.patch_embed(x.type(self.dtype))    # [B, T, L, C]
+        B, T, L, C = x.shape
+
+        # 2) flatten and reorder to [B, T*L, C]
+        x = x.view(B, T * L, C)
+
+        # 3) prepend cls token
+        cls = self.cls_token.expand(B, -1, -1)      # [B,1,C]
+        tokens = torch.cat((cls, x), dim=1)          # [B,1+T*L,C]
+        return tokens
+
+    def forward_from_patches(self,
+                             tokens: torch.Tensor,
+                             use_image: bool = False):
+        """
+        Input tokens: [B, 1+T*L, C] as produced by patchify_frames()
+        Runs everything in forward() *after* patch_embed + reshape.
+        """
+        # this block is lifted straight from your forward()
+        if self.sep_pos_embed:
+            # … copy the sep_pos_embed logic from forward()
+            pos_embed = …
+        else:
+            if use_image:
+                cls_pos = self.pos_embed[:, :1, :]
+                # average spatial embeddings over time
+                img_pos = (
+                    self.pos_embed[:, 1:, :]
+                    .view(1, self.T, -1, self.embed_dim)
+                    .mean(dim=1)
+                )
+                pos_embed = torch.cat([cls_pos, img_pos], dim=1)
+            else:
+                pos_embed = self.pos_embed
+
+        x = tokens + pos_embed
+
+        # pass through the 48 blocks
+        for blk in self.blocks:
+            x = blk(x)
+
+        # final pooling/projector
+        x = self.clip_projector(x)
+        return x
+    # ──────────────────────────────────────────────────────────────────────────
+
     def get_num_layers(self):
         return len(self.blocks)
 
