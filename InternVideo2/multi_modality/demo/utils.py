@@ -97,14 +97,21 @@ class PatchFIFO:
         return frame_np[:8,:8,:3].tobytes()
 
     def push(self, frame_np):
-        self.device = next(self.model.parameters()).device
-        
-        h = self._quick_hash(frame_np)
-        if self.buff and self.buff[-1].frame_hash == h and False:
-            # same frame as last push – skip
-            return False
+        # 0️⃣  Detect whether the model (and thus desired device) moved
+        current_device = next(self.model.parameters()).device
+        if current_device != self.device:
+            # migrate everything we already cached
+            self.buff = deque(
+                PatchCacheEntry(e.frame_hash, e.tokens.to(current_device))
+                for e in self.buff
+            )
+            self.device = current_device
 
-        tokens = self._to_tokens(frame_np)
+        h = self._quick_hash(frame_np)
+        if self.buff and self.buff[-1].frame_hash == h:
+            return False  # duplicate frame, skip
+
+        tokens = self._to_tokens(frame_np)         # already on self.device
         self.buff.append(PatchCacheEntry(h, tokens))
 
         if len(self.buff) > self.max_frames:
@@ -112,8 +119,8 @@ class PatchFIFO:
         return True
 
     def assemble_clip(self):
-        # concat along time dimension
-        return torch.cat([e.tokens for e in self.buff], dim=1)  # [1, N_total, C]
+        return torch.cat([e.tokens.to(self.device) for e in self.buff], dim=1)
+
 
 
 # Updated retrieve_text with frame‑level patch embedding cache
