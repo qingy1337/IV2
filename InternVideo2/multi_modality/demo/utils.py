@@ -68,10 +68,28 @@ class PatchFIFO:
         self.device = next(model.parameters()).device
 
     def _to_tokens(self, frame_np):
-        frame = torch.from_numpy(frame_np).permute(2,0,1).unsqueeze(0)  # [1,C,H,W]
-        frame = frame.unsqueeze(2).to(self.device)  # -> [1,C,T=1,H,W]
+        """
+        Convert one H×W×3 BGR uint8 frame to patch tokens on self.device.
+        """
+        # 1)  Resize & BGR→RGB
+        img = cv2.resize(frame_np[:, :, ::-1], (224, 224))
+    
+        # 2)  Normalise to 0‑1 and apply mean/std (same as frames2tensor)
+        img = (img / 255.0 - v_mean) / v_std      # float64 nd‑array, shape [H,W,3]
+    
+        # 3)  → torch.float32 on correct device
+        img_t = (
+            torch.from_numpy(img)
+            .permute(2, 0, 1)        # [3,H,W]
+            .unsqueeze(0)            # [1,3,H,W]
+            .unsqueeze(2)            # [1,3,T=1,H,W]
+            .to(self.device, dtype=self.model.patch_embed.proj.weight.dtype)
+        )
+    
+        # 4)  Run only the patch step (no gradients)
         with torch.no_grad():
-            return self.model.patchify_frames(frame)   # [1, patches, C]
+            return self.model.patchify_frames(img_t)   # [1, 1+L, C]
+
 
     @staticmethod
     def _quick_hash(frame_np):
