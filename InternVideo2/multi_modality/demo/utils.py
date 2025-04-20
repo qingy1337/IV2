@@ -68,7 +68,7 @@ def retrieve_text(frames,
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
     vid_feat = vlm.get_vid_feat(frames_tensor)
 
-    calculate = False
+    calculate = True # TEMPORARILY SET TO TRUE for benchmarking. Set to False for default.
     for t in texts:
         if t not in tensor_cache:
             calculate = True
@@ -78,8 +78,8 @@ def retrieve_text(frames,
         text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
         text_feats = [text_feat_d[t] for t in texts]
         text_feats_tensor = torch.cat(text_feats, 0)
-        for j in range(len(texts)):
-            tensor_cache[texts[j]] = text_feats_tensor[j]
+        # for j in range(len(texts)):
+        #     tensor_cache[texts[j]] = text_feats_tensor[j]
     else:
         if log: print("Using Cached")
         text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
