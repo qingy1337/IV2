@@ -100,42 +100,32 @@ class PatchFIFO:
 def retrieve_text(frames,
                   texts,
                   model,
+                  patch_cache,
                   topk: int = 5,
                   config: dict = {},
                   device=torch.device('cuda'),
                   log: bool = False):
     """
-    Inference using patch-level caching for video frames.
-    Assumes PatchFIFO named `patch_cache` is defined globally.
+    Inference using frame-level patch embedding caching.
+    Accepts a PatchFIFO instance to manage frame tokens.
     """
     vlm = model.to(device)
     fn = config.get('num_frames', 8)
 
-    # Initialize patch cache once
-    global patch_cache
-    try:
-        patch_cache
-    except NameError:
-        patch_cache = PatchFIFO(vlm.vision_encoder, max_frames=fn)
-
-    # Push only the newest frame (numpy array H×W×3)
+    # 1) Push only the newest frame and wait for full window
     new_frame = frames[-1]
     patch_cache.push(new_frame)
-
-    # Wait until cache has full window
     if len(patch_cache.buff) < fn:
         return [], np.array([])
 
-    # Assemble patch tokens for the 8-frame window
-    clip_tokens = patch_cache.assemble_clip().to(device)  # [1, N, C]
-
-    # Run the heavy transformer only on tokens
+    # 2) Assemble patch tokens and run the heavy transformer
+    clip_tokens = patch_cache.assemble_clip().to(device)
     with torch.no_grad():
-        pooled = vlm.vision_encoder.forward_from_patches(clip_tokens, use_image=False)  # [1, C]
-        vid_feat = vlm.vision_proj(pooled)                                               
+        pooled = vlm.vision_encoder.forward_from_patches(clip_tokens, use_image=False)
+        vid_feat = vlm.vision_proj(pooled)
         vid_feat = vid_feat / vid_feat.norm(dim=-1, keepdim=True)
 
-    # Text feature retrieval (cached as before)
+    # 3) Text feature retrieval (cached as before)
     calculate = any(t not in tensor_cache for t in texts)
     if calculate:
         text_feat_d = get_text_feat_dict(texts, vlm, {})
@@ -148,13 +138,11 @@ def retrieve_text(frames,
             print("Using Cached text features")
         text_feats_tensor = torch.stack([tensor_cache[t] for t in texts])
 
-    # Compute similarity and top-k
+    # 4) Similarity scoring
     probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
     ret_texts = [texts[i] for i in idxs.long().cpu().numpy()[0].tolist()]
 
     return ret_texts, probs.float().cpu().numpy()[0]
-
-
 
 def setup_internvideo2(config: dict):
     if "bert" in config.model.text_encoder.name:
