@@ -200,9 +200,9 @@ class InternVideo2_CLIP_small(nn.Module):
             init_values=self.config.model.vision_encoder.init_values,
             qk_normalization=self.config.model.vision_encoder.qk_normalization,
             depth=self.config.model.vision_encoder.depth,
-            use_flash_attn=False,
-            use_fused_rmsnorm=False,
-            use_fused_mlp=False,
+            use_flash_attn=False, # ENABLE FOR INCREASED PERFORMANCE
+            use_fused_rmsnorm=False, # ENABLE FOR INCREASED PERFORMANCE
+            use_fused_mlp=False, # ENABLE FOR INCREASED PERFORMANCE
             fused_mlp_heuristic=self.config.model.vision_encoder.fused_mlp_heuristic,
             attn_pool_num_heads=self.config.model.vision_encoder.attn_pool_num_heads,
             clip_embed_dim=self.config.model.vision_encoder.clip_embed_dim,
@@ -213,7 +213,7 @@ class InternVideo2_CLIP_small(nn.Module):
             use_checkpoint=self.config.model.vision_encoder.use_checkpoint,
             checkpoint_num=self.config.model.vision_encoder.checkpoint_num,
         )
-        return vision_encoder.to(torch.device('mps'))
+        return vision_encoder
 
     def build_text_encoder(self, cfg, projection_dim):
         """build text_encoder and possiblly video-to-text multimodal fusion encoder.
