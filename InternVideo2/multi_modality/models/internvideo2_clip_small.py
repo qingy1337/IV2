@@ -200,7 +200,7 @@ class InternVideo2_CLIP_small(nn.Module):
             init_values=self.config.model.vision_encoder.init_values,
             qk_normalization=self.config.model.vision_encoder.qk_normalization,
             depth=self.config.model.vision_encoder.depth,
-            use_flash_attn=False, # ENABLE FOR INCREASED PERFORMANCE
+            use_flash_attn=True, # ENABLE FOR INCREASED PERFORMANCE
             use_fused_rmsnorm=False, # ENABLE FOR INCREASED PERFORMANCE
             use_fused_mlp=False, # ENABLE FOR INCREASED PERFORMANCE
             fused_mlp_heuristic=self.config.model.vision_encoder.fused_mlp_heuristic,
