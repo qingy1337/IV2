@@ -97,6 +97,8 @@ class PatchFIFO:
         return frame_np[:8,:8,:3].tobytes()
 
     def push(self, frame_np):
+        self.device = next(self.model.parameters()).device
+        
         h = self._quick_hash(frame_np)
         if self.buff and self.buff[-1].frame_hash == h:
             # same frame as last push – skip
