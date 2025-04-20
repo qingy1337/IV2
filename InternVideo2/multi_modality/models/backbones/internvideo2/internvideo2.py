@@ -662,7 +662,81 @@ class PretrainInternVideo2(nn.Module):
         
 
         return x_vis, x_pool_vis, x_clip_align, x_align
-    
+
+    # ------------------------------------------------------------
+    # NEW: encode *one* or *many* frames only up to the patch tokens
+    # ------------------------------------------------------------
+    @torch.no_grad()
+    def patchify_frames(self, x):
+        """
+        Args
+        ----
+          x : torch.Tensor  [B, C, T, H, W]  (same shape you feed to forward)
+        Returns
+        -------
+          tokens : torch.Tensor  [B, T*L, C]  tokens with *no* class token,
+                   *no* pos‑emb added.
+        """
+        x = self.patch_embed(x.type(self.dtype))   # [B, T, L, C]
+        B, T, L, C = x.shape
+        tokens = x.view(B, T * L, C)               # flatten (T,L) into sequence
+        return tokens
+
+    # ------------------------------------------------------------
+    # NEW: run the heavy transformer on pre‑computed tokens
+    # ------------------------------------------------------------
+    @torch.no_grad()
+    def forward_from_patches(self, tokens, use_image=False):
+        """
+        Args
+        ----
+          tokens : torch.Tensor  [B, N, C]  output of patchify_frames()
+          use_image : bool       True if N came from a *single* frame
+        Returns
+        -------
+          pooled : torch.Tensor  [B, embed_dim]  (same as pooled_vision_embeds)
+        """
+        B, N, C = tokens.shape
+
+        # 1. prepend the cls token
+        cls_tokens = self.cls_token.expand(B, -1, -1)   # [B,1,C]
+        x = torch.cat((cls_tokens, tokens), dim=1)      # [B, N+1, C]
+
+        # 2. add the right positional embeddings  (exactly the same logic as
+        #    the original forward(), but re‑used here verbatim)
+        if self.sep_pos_embed:
+            raise NotImplementedError("sep_pos_embed is not handled")
+        else:
+            if use_image:
+                if self.sep_image_video_pos_embed:
+                    pos_embed = self.img_pos_embed
+                else:
+                    cls_pos = self.pos_embed[:, :1]
+                    img_pos = self.pos_embed[:, 1:, :].view(
+                        1, self.num_frames,
+                        self.patch_embed.num_patches // self.num_frames,
+                        self.embed_dim
+                    ).mean(dim=1)
+                    pos_embed = torch.cat([cls_pos, img_pos], dim=1)
+            else:
+                pos_embed = self.pos_embed
+        x = x + pos_embed
+
+        # 3. run through the transformer stack  (copied from forward)
+        residual = None
+        for blk in self.blocks:
+            if isinstance(x, tuple):
+                x, residual = x
+            x = blk(x, residual=residual)
+
+        if isinstance(x, tuple):
+            x, residual = x
+            if residual is not None:
+                x = x + residual
+
+        # 4. pool exactly as forward() does
+        x_pool_vis = self.clip_projector(x)
+        return x_pool_vis          # will later get projected by vision_proj
 
 def pretrain_internvideo2_1b_patch14_224(config):
     model = PretrainInternVideo2(
