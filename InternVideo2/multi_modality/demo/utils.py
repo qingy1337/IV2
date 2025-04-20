@@ -148,8 +148,11 @@ def retrieve_text(frames,
     # 2) Assemble patch tokens and run the heavy transformer
     clip_tokens = patch_cache.assemble_clip().to(device)
     with torch.no_grad():
-        pooled = vlm.vision_encoder.forward_from_patches(clip_tokens, use_image=False)
-        vid_feat = vlm.vision_proj(pooled)
+        pooled = vlm.vision_encoder.forward_from_patches(
+            clip_tokens, use_image=False
+        )                               # pooled shape [1, clip_embed_dim]
+    
+        vid_feat = vlm.vision_align(pooled)            # ⬅️ use vision_align
         vid_feat = vid_feat / vid_feat.norm(dim=-1, keepdim=True)
 
     # 3) Text feature retrieval (cached as before)
