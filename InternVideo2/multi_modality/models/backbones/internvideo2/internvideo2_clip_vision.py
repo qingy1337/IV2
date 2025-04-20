@@ -492,7 +492,23 @@ class InternVideo2(nn.Module):
         # this block is lifted straight from your forward()
         if self.sep_pos_embed:
             # … copy the sep_pos_embed logic from forward()
-            pos_embed = …
+            if use_image:
+                pos_embed = self.pos_embed_spatial
+            else:
+                pos_embed = self.pos_embed_spatial.repeat(
+                    1, self.grid_size[0], 1
+                ) + torch.repeat_interleave(
+                    self.pos_embed_temporal,
+                    self.grid_size[1] * self.grid_size[2],
+                    dim=1,
+                )
+            pos_embed = torch.cat(
+                [
+                    self.pos_embed_cls.expand(pos_embed.shape[0], -1, -1),
+                    pos_embed,
+                ],
+                1,
+            )
         else:
             if use_image:
                 cls_pos = self.pos_embed[:, :1, :]
