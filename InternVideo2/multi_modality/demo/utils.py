@@ -157,12 +157,12 @@ def retrieve_text(frames,
 
     # 3) Text feature retrieval (cached as before)
     calculate = any(t not in tensor_cache for t in texts)
-    if calculate:
+    if True:
         text_feat_d = get_text_feat_dict(texts, vlm, {})
         text_feats = [text_feat_d[t] for t in texts]
         text_feats_tensor = torch.cat(text_feats, dim=0)
-        for idx, t in enumerate(texts):
-            tensor_cache[t] = text_feats_tensor[idx]
+        # for idx, t in enumerate(texts):
+        #     tensor_cache[t] = text_feats_tensor[idx]
     else:
         if log:
             print("Using Cached text features")
