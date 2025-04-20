@@ -467,28 +467,23 @@ class InternVideo2(nn.Module):
     # ─── ADD THIS ──────────────────────────────────────────────────────────────
     def patchify_frames(self, x: torch.Tensor):
         """
-        Input x: [B, C, T, H, W]
-        Returns token tensor [B, 1+T*L, C] (including cls token if you like)
+        x: [B, C, T, H, W] with T==1 here.
+        Return *only* the patch tokens: [B, T*L, C]  (no cls).
         """
-        # 1) spatial patch embedding
-        x = self.patch_embed(x.type(self.dtype))    # [B, T, L, C]
+        x = self.patch_embed(x.type(self.dtype))   # [B, T, L, C]
         B, T, L, C = x.shape
+        tokens = x.view(B, T * L, C)               # flatten spatial & temporal
+        return tokens                              # length = T*L
 
-        # 2) flatten and reorder to [B, T*L, C]
-        x = x.view(B, T * L, C)
 
-        # 3) prepend cls token
-        cls = self.cls_token.expand(B, -1, -1)      # [B,1,C]
-        tokens = torch.cat((cls, x), dim=1)          # [B,1+T*L,C]
-        return tokens
-
-    def forward_from_patches(self,
-                             tokens: torch.Tensor,
-                             use_image: bool = False):
+    def forward_from_patches(self, tokens: torch.Tensor, use_image: bool = False):
         """
-        Input tokens: [B, 1+T*L, C] as produced by patchify_frames()
-        Runs everything in forward() *after* patch_embed + reshape.
+        tokens: [B, T*L, C]  (no cls yet)
         """
+        B = tokens.size(0)
+        cls = self.cls_token.expand(B, -1, -1)     # [B,1,C]
+        x = torch.cat((cls, tokens), dim=1)        # [B,1+T*L,C]
+        
         # this block is lifted straight from your forward()
         if self.sep_pos_embed:
             # … copy the sep_pos_embed logic from forward()
@@ -522,13 +517,9 @@ class InternVideo2(nn.Module):
             else:
                 pos_embed = self.pos_embed
 
-        x = tokens + pos_embed
-
-        # pass through the 48 blocks
+        x = x + pos_embed
         for blk in self.blocks:
             x = blk(x)
-
-        # final pooling/projector
         x = self.clip_projector(x)
         return x
     # ──────────────────────────────────────────────────────────────────────────
