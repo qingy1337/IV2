@@ -467,24 +467,23 @@ class InternVideo2(nn.Module):
     # ─── ADD THIS ──────────────────────────────────────────────────────────────
     def patchify_frames(self, x: torch.Tensor):
         """
-        x: [B, C, T, H, W] with T==1 here.
-        Return *only* the patch tokens: [B, T*L, C]  (no cls).
+        x : [B, C, T, H, W]  →  tokens : [B, T*L, C]  (NO cls token yet)
         """
-        x = self.patch_embed(x.type(self.dtype))   # [B, T, L, C]
+        x = self.patch_embed(x.type(self.dtype))      # [B, T, L, C]
         B, T, L, C = x.shape
-        tokens = x.view(B, T * L, C)               # flatten spatial & temporal
-        return tokens                              # length = T*L
-
+        return x.view(B, T * L, C)                    # flatten time‑×‑space
 
     def forward_from_patches(self, tokens: torch.Tensor, use_image: bool = False):
         """
-        tokens: [B, T*L, C]  (no cls yet)
+        tokens : [B, T*L, C] from patchify_frames (no CLS yet)
         """
         B = tokens.size(0)
-        cls = self.cls_token.expand(B, -1, -1)     # [B,1,C]
-        x = torch.cat((cls, tokens), dim=1)        # [B,1+T*L,C]
-        
-        # this block is lifted straight from your forward()
+    
+        # ① prepend a single CLS token
+        cls = self.cls_token.expand(B, -1, -1)        # [B,1,C]
+        x = torch.cat((cls, tokens), dim=1)            # [B,1+T*L,C]
+    
+        # ② positional embeddings  (same logic as in forward)
         if self.sep_pos_embed:
             # … copy the sep_pos_embed logic from forward()
             if use_image:
@@ -507,7 +506,6 @@ class InternVideo2(nn.Module):
         else:
             if use_image:
                 cls_pos = self.pos_embed[:, :1, :]
-                # average spatial embeddings over time
                 img_pos = (
                     self.pos_embed[:, 1:, :]
                     .view(1, self.T, -1, self.embed_dim)
@@ -516,12 +514,15 @@ class InternVideo2(nn.Module):
                 pos_embed = torch.cat([cls_pos, img_pos], dim=1)
             else:
                 pos_embed = self.pos_embed
-
         x = x + pos_embed
+    
+        # ③ run blocks, projector, norm  (exact copy of original)
         for blk in self.blocks:
             x = blk(x)
         x = self.clip_projector(x)
-        return x
+        x = self.fc_norm(x)
+        return x                                       # [B, clip_embed_dim]
+
     # ──────────────────────────────────────────────────────────────────────────
 
     def get_num_layers(self):
