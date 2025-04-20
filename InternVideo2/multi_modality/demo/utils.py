@@ -100,7 +100,7 @@ class PatchFIFO:
         self.device = next(self.model.parameters()).device
         
         h = self._quick_hash(frame_np)
-        if self.buff and self.buff[-1].frame_hash == h:
+        if self.buff and self.buff[-1].frame_hash == h and False:
             # same frame as last push – skip
             return False
 
