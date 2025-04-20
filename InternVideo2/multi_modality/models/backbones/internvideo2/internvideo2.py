@@ -677,6 +677,7 @@ class PretrainInternVideo2(nn.Module):
           tokens : torch.Tensor  [B, T*L, C]  tokens with *no* class token,
                    *no* pos‑emb added.
         """
+        print("Patchify Frames")
         x = self.patch_embed(x.type(self.dtype))   # [B, T, L, C]
         B, T, L, C = x.shape
         tokens = x.view(B, T * L, C)               # flatten (T,L) into sequence
@@ -696,6 +697,7 @@ class PretrainInternVideo2(nn.Module):
         -------
           pooled : torch.Tensor  [B, embed_dim]  (same as pooled_vision_embeds)
         """
+        print("Forward from Patches")
         B, N, C = tokens.shape
 
         # 1. prepend the cls token
