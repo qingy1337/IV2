@@ -108,7 +108,7 @@ class PatchFIFO:
             self.device = current_device
 
         h = self._quick_hash(frame_np)
-        if self.buff and self.buff[-1].frame_hash == h:
+        if self.buff and self.buff[-1].frame_hash == h and False:
             return False  # duplicate frame, skip
 
         tokens = self._to_tokens(frame_np)         # already on self.device
