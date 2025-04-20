@@ -38,7 +38,7 @@ class InternVideo2_CLIP_small(nn.Module):
                 self.config.model.vision_encoder.clip_embed_dim,
                 self.config.model.vision_encoder.align_dim
             ),
-        ).to(torch.device("mps"))
+        )
         self.text_encoder = self.build_text_encoder(cfg=text_encoder_cfg['text_cfg'], projection_dim=text_encoder_cfg["embed_dim"])
         # adopt 1 / 100. as in ViCLIP
         self.temp = nn.parameter.Parameter(torch.ones([]) * config.model.temp)
@@ -220,7 +220,7 @@ class InternVideo2_CLIP_small(nn.Module):
         Returns: nn.Module. The text encoder
 
         """
-        text_encoder = TextTransformer(cfg, projection_dim).to(torch.device("mps"))
+        text_encoder = TextTransformer(cfg, projection_dim)
 
         return text_encoder
 
