@@ -34,11 +34,12 @@ class WindowInternVideo2(InternVideo2):
         # Buffer to collect frames until we have 8
         self.frame_buffer = []
 
-    def forward(self, x, force_full_forward=False):
+    def forward(self, x, use_image = False, force_full_forward=False):
         """
         Args:
-            x: Input frame [B, C, H, W] or sequence [B, C, T, H, W]
-            force_full_forward: Force full forward pass
+            x: Input frame [B, C, H, W] or sequence [B, C, T, H, W].
+            force_full_forward: Force full forward pass.
+            use_image: Passed on to the InternVideo2.forward() function (if it's a full forward).
         """
         # Check input shape
         if len(x.shape) == 4:  # Single frame
@@ -54,7 +55,7 @@ class WindowInternVideo2(InternVideo2):
         if force_full_forward or len(self.frame_buffer) >= 8:
             # Take last 8 frames and do full forward
             frames = torch.stack(self.frame_buffer[-8:], dim=2)  # [B, C, 8, H, W]
-            self.current_embedding = super().forward(frames)
+            self.current_embedding = super().forward(frames, use_image=use_image)
             self.reset_state()
         else:
             # Do update with new frame(s)
