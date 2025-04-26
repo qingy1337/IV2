@@ -363,6 +363,7 @@ class InternVideo2(nn.Module):
         self.use_flash_attn = use_flash_attn
         self.embed_dim = embed_dim
         self.T = num_frames // tubelet_size
+        self.num_heads = num_heads
 
         if False:
             norm_layer_for_blocks = partial(DropoutAddRMSNorm, eps=1e-6, prenorm=True)
