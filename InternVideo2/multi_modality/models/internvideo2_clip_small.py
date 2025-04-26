@@ -187,7 +187,7 @@ class InternVideo2_CLIP_small(nn.Module):
         Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
 
         """
-        vision_encoder = WindowInternVideo2( # Originall just InternVideo2. WindowInternVideo2 is a wrapper around the InternVideo2 so it should work just fine.
+        vision_encoder = WindowInternVideo2( # Originally just InternVideo2. WindowInternVideo2 is a wrapper around the InternVideo2 so it should work just fine.
             in_chans=self.config.model.vision_encoder.in_chans,
             patch_size=self.config.model.vision_encoder.patch_size,
             img_size=self.config.model.vision_encoder.img_size,
