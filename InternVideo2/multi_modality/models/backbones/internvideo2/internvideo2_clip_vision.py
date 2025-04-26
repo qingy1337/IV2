@@ -363,8 +363,11 @@ class InternVideo2(nn.Module):
         self.use_flash_attn = use_flash_attn
         self.embed_dim = embed_dim
         self.T = num_frames // tubelet_size
+
+        # Added so that WindowInternVideo2 can access
         self.num_heads = num_heads
         self.mlp_ratio = mlp_ratio
+        self.qkv_bias = qkv_bias
 
         if False:
             norm_layer_for_blocks = partial(DropoutAddRMSNorm, eps=1e-6, prenorm=True)
