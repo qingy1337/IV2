@@ -12,6 +12,8 @@ from einops import rearrange
 
 from .internvideo2_clip_vision import *
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s -%(levelname)s -on line: %(lineno)d -%(message)s')
+
 logger = logging.getLogger(__name__)
 
 class WindowInternVideo2(InternVideo2):
