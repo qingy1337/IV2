@@ -534,7 +534,7 @@ class InternVideo2(nn.Module):
 
         x = self.fc_norm(x)
 
-        print('---- InternVideo2.forward() ----')
-        print(f'Function executed successfully, x is shaped {x.shape}')
+        # print('---- InternVideo2.forward() ----')
+        # print(f'Function executed successfully, x is shaped {x.shape}')
 
         return x
