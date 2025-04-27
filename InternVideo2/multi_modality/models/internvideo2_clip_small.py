@@ -123,12 +123,13 @@ class InternVideo2_CLIP_small(nn.Module):
             loss_vtc=loss_vtc,
         )
 
-    def encode_vision(self, image, test=False):
+    def encode_vision(self, image, test=False, force_full_forward = True):
         """encode image / videos as features.
 
         Args:
             image (torch.Tensor): The input images.
             test (bool): Whether testing.
+            force_full_forward (bool): Whether to do a full forward pass, or do the sliding window technique.
 
         Returns: tuple.
             - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
@@ -138,13 +139,13 @@ class InternVideo2_CLIP_small(nn.Module):
         use_image = True if T == 1 else False
         image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
 
-        vision_embeds = self.vision_encoder(image, use_image=use_image)
+        vision_embeds = self.vision_encoder(image, use_image=use_image, force_full_forward=force_full_forward)
         vision_embeds = self.vision_align(vision_embeds)
         return vision_embeds
 
-    def get_vid_feat(self, frames: torch.Tensor):
+    def get_vid_feat(self, frames: torch.Tensor, force_full_forward: bool = True):
         with torch.no_grad():
-            vfeat = self.encode_vision(frames, test=True)
+            vfeat = self.encode_vision(frames, test=True, force_full_forward=force_full_forward)
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
         return vfeat

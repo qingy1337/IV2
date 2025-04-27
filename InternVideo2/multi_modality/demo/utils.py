@@ -58,7 +58,8 @@ def retrieve_text(frames,
                   topk:int=5,
                   config: dict={},
                   device=torch.device('cuda'),
-                  log:bool = False):
+                  log:bool = False,
+                  force_full_forward:bool = True):
     # print(texts)
     vlm = model
     vlm = vlm.to(device)
@@ -66,7 +67,7 @@ def retrieve_text(frames,
     fn = config.get('num_frames', 8)
     size_t = config.get('size_t', 224)
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
-    vid_feat = vlm.get_vid_feat(frames_tensor)
+    vid_feat = vlm.get_vid_feat(frames_tensor, force_full_forward = force_full_forward)
 
     calculate = False
     for t in texts:
