@@ -65,8 +65,12 @@ class WindowInternVideo2(InternVideo2):
 
             self.current_embedding = super().forward(frames, use_image=use_image)
 
+            output_embedding = self.current_embedding
+
             log(f"Resetting the state... (self.current_embedding is {self.current_embedding.shape})")
             self.reset_state()
+
+            self.current_embedding = output_embedding
         else:
             # Do update with new frame(s)
             for i in range(T):
@@ -81,7 +85,7 @@ class WindowInternVideo2(InternVideo2):
                 )
                 self.frame_count += 1
 
-        log(f"Returning current_embedding")
+        log(f"Returning current_embedding: {self.current_embedding.shape}")
 
         return self.current_embedding
 
