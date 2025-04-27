@@ -1,5 +1,3 @@
-export MASTER_PORT=$((12000 + $RANDOM % 20000))
-export OMP_NUM_THREADS=1
 echo "PYTHONPATH: ${PYTHONPATH}"
 which_python=$(which python)
 echo "which python: ${which_python}"
@@ -11,16 +9,12 @@ JOB_NAME='B14'
 OUTPUT_DIR="$(dirname $0)/$JOB_NAME"
 LOG_DIR="./logs/${JOB_NAME}"
 PARTITION='video'
-NNODE=2
-NUM_GPUS=8
-NUM_CPU=128
+NNODE=1
+NUM_GPUS=1
+NUM_CPU=64
 
-srun -p ${PARTITION} \
-    -n${NNODE} \
-    --gres=gpu:${NUM_GPUS} \
-    --ntasks-per-node=1 \
-    --cpus-per-task=${NUM_CPU} \
-    bash torchrun.sh \
+# Using torchrun directly instead of the wrapper script
+torchrun \
     --nnodes=${NNODE} \
     --nproc_per_node=${NUM_GPUS} \
     --rdzv_backend=c10d \
