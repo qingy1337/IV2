@@ -140,6 +140,10 @@ class InternVideo2_CLIP_small(nn.Module):
         image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
 
         vision_embeds = self.vision_encoder(image, use_image=use_image, force_full_forward=force_full_forward)
+
+        print(f"---- InternVideo2_CLIP_Small.encode_vision(force_full_forward={force_full_forward}) ----")
+        print(f"The vision_embeds are in the shape {vision_embeds.shape}")
+
         vision_embeds = self.vision_align(vision_embeds)
         return vision_embeds
 
