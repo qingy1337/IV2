@@ -70,11 +70,11 @@ def train(
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             loss_dict = model(image, text_input, idx=idx)
             loss = sum(loss_dict.values())
-        
+
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             model.backward(loss)
             model.step()
-        else: 
+        else:
             if not config.use_half_precision or config.get('use_bf16', True):
                 optimizer.zero_grad()
                 loss.backward()
@@ -259,7 +259,7 @@ def main(config):
             else:
                 tag = f"ckpt_{epoch:02d}.pth"
             model.save_checkpoint(config.output_dir, tag=tag, save_latest=False, exclude_frozen_parameters=True)
-            
+
         elif is_main_process():
             state_dict = model_without_ddp.state_dict()
             param_grad_dict = {
@@ -324,7 +324,7 @@ def main(config):
                 eval_res.to_json(join(config.output_dir, eval_file))
                 best = cur_r_mean
                 best_epoch = epoch
-        
+
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             r_mean_best = torch.tensor([0.0, 0.0]).to(device)
             if is_main_process():
@@ -332,13 +332,13 @@ def main(config):
                 r_mean_best[1] = best
             dist.broadcast(r_mean_best, 0)
             cur_r_mean, best = r_mean_best[0].item(), r_mean_best[1].item()
-        
+
             if not config.evaluate and cur_r_mean > best:
                 model.save_checkpoint(config.output_dir, tag="ckpt_best.pth", save_latest=False, exclude_frozen_parameters=True)
 
         if config.evaluate:
             break
-        
+
         start_step = global_step
 
         dist.barrier()

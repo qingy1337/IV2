@@ -73,14 +73,15 @@ model = dict(
     freeze_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path="your_model_path/B14_ft_k710_f8.pth",
+    vision_ckpt_path="/root/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
     load_vision_ckpt_from_internvideo2_stage2=False,
-    text_ckpt_path="your_model_path/mobileclip_blt.pt",
+    text_ckpt_path="/root/IV2/models/mobileclip_blt.pt",
+    extra_ckpt_path="/root/IV2/models/clip/B14/pytorch_model.bin"
 )
 
 criterion = dict(
     loss_weight=dict(
-        vtc=1.0, 
+        vtc=1.0,
     ),  # 0: disabled.
 )
 
@@ -112,22 +113,22 @@ gradient_checkpointing = True
 # ========================= wandb ==========================
 wandb = dict(
     enable=False,
-    entity="likunchang",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
-    project="InternVideo2_CLIP",  # setup in your command line
+    entity="qingy2019-conker-mobile-inc-",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
+    project="window_iv2",  # setup in your command line
 )
 dist_url = "env://"
 device = "cuda"
 mode = "pt"
 
 # ========================= others ==========================
-output_dir = None  # output dir
+output_dir = './training_outputs_window/'  # output dir
 resume = False  # if True, load optimizer and scheduler states as well
 debug = False
 log_freq = 1
 seed = 42
 
 save_latest = False
-save_iter = 500
+save_iter = 100
 auto_resume = True
 pretrained_path = ""  # path to pretrained model weights, for resume only?
 
