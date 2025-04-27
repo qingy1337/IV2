@@ -64,6 +64,8 @@ class WindowInternVideo2(InternVideo2):
             log("Using the last 8 frames in a Full Forward Pass")
 
             self.current_embedding = super().forward(frames, use_image=use_image)
+
+            log(f"Resetting the state... (self.current_embedding is {self.current_embedding.shape})")
             self.reset_state()
         else:
             # Do update with new frame(s)
@@ -78,6 +80,8 @@ class WindowInternVideo2(InternVideo2):
                     new_frame_tokens
                 )
                 self.frame_count += 1
+
+        log(f"Returning current_embedding")
 
         return self.current_embedding
 
