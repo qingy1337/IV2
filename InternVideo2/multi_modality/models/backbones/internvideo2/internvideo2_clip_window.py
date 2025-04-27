@@ -31,9 +31,11 @@ class WindowInternVideo2(InternVideo2):
         # Initialize state
         self.reset_state()
 
-    def reset_state(self):
+    def reset_state(self, reset_current_embedding = True):
         self.frame_count = 0
-        self.current_embedding = None
+
+        if reset_current_embedding:
+            self.current_embedding = None
         # Buffer to collect frames until we have 8
         self.frame_buffer = []
 
@@ -65,12 +67,8 @@ class WindowInternVideo2(InternVideo2):
 
             self.current_embedding = super().forward(frames, use_image=use_image)
 
-            output_embedding = self.current_embedding
-
             # log(f"Resetting the state... (self.current_embedding is {self.current_embedding.shape})")
-            self.reset_state()
-
-            self.current_embedding = output_embedding
+            self.reset_state(reset_current_embedding = False)
         else:
             # Do update with new frame(s)
             for i in range(T):
