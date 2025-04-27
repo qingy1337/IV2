@@ -12,6 +12,9 @@ from einops import rearrange
 
 from .internvideo2_clip_vision import *
 
+def log(text):
+    print('---- WindowInternVideo2.forward() ----\n' + text)
+
 class WindowInternVideo2(InternVideo2):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -51,12 +54,15 @@ class WindowInternVideo2(InternVideo2):
         # Add new frame(s) to buffer
         self.frame_buffer.extend([x[:,:,i] for i in range(T)])
 
-        print(f"---- WindowInternVideo2.forward() ----\nAdding {T} frames. x is of shape {x.shape}")
+        log(f"Adding {T} frames. x is of shape {x.shape}")
 
         # If we have 8 frames or force_full_forward
         if force_full_forward or len(self.frame_buffer) >= 8:
             # Take last 8 frames and do full forward
             frames = torch.stack(self.frame_buffer[-8:], dim=2)  # [B, C, 8, H, W]
+
+            log("Using the last 8 frames in a Full Forward Pass")
+
             self.current_embedding = super().forward(frames, use_image=use_image)
             self.reset_state()
         else:
