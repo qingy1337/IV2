@@ -22,126 +22,211 @@ from utils.logger import log_dict_to_wandb, setup_wandb
 
 logger = logging.getLogger(__name__)
 
-
 def train(
-    model,
-    train_loaders,
-    optimizer,
-    tokenizer,
-    epoch,
-    global_step,
-    device,
-    scheduler,
-    scaler,
-    config,
-    data_type,
-    skip_num=0
+    model,                # The neural network model being trained
+    train_loaders,        # A list or dictionary of data loaders for the training datasets
+    optimizer,            # The optimization algorithm (e.g., Adam, SGD)
+    tokenizer,            # Tokenizer for processing text data
+    epoch,                # The current epoch number
+    global_step,          # The total number of training steps performed so far
+    device,               # The computing device (CPU or GPU)
+    scheduler,            # Learning rate scheduler
+    scaler,               # Gradient scaler for automatic mixed precision (AMP)
+    config,               # Configuration object containing hyperparameters and settings
+    data_type,            # The data type for AMP (e.g., torch.float16, torch.bfloat16)
+    skip_num=0            # Number of batches to skip at the beginning of the epoch (for resuming)
 ):
+    """
+    Performs one epoch of training.
+
+    Args:
+        model: The model to be trained.
+        train_loaders: Data loaders for the training data.
+        optimizer: The optimizer instance.
+        tokenizer: The text tokenizer.
+        epoch: Current epoch index.
+        global_step: Current global training step.
+        device: The device to train on.
+        scheduler: The learning rate scheduler.
+        scaler: The gradient scaler for mixed precision.
+        config: The experiment configuration.
+        data_type: The data type for AMP.
+        skip_num: Number of batches to skip.
+
+    Returns:
+        int: The updated global step count after the epoch.
+    """
+    # Set the model to training mode (enables dropout, batch norm updates, etc.)
     model.train()
 
+    # Initialize MetricLogger to track and average metrics during training
     metric_logger = MetricLogger(delimiter="  ")
+    # Add meters to track learning rate and the model's temperature parameter (often used in contrastive losses)
     metric_logger.add_meter("lr", SmoothedValue(window=100, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=100, fmt="{value:.4f}"))
-    loss_names = ["loss_" + k for k, v in config.criterion.loss_weight.items() if v != 0]
+    # Determine the names of the active loss components based on non-zero weights in the config
+    active_loss_names = ["loss_" + k for k, v in config.criterion.loss_weight.items() if v != 0]
 
+    # Identify the different types of media (e.g., 'image', 'video') present in the training loaders
     media_types = get_media_types(train_loaders)
 
-    for name in loss_names:
-        for m in media_types:
+    # Add specific meters for each active loss component and each media type
+    for loss_name in active_loss_names:
+        for media_type_key in media_types:
             metric_logger.add_meter(
-                f"{m}-{name}", SmoothedValue(window=100, fmt="{value:.4f}")
+                f"{media_type_key}-{loss_name}", SmoothedValue(window=100, fmt="{value:.4f}")
             )
 
+    # Define the header for logging messages for this epoch
     header = f"Train Epoch: [{epoch}]"
+    # Get the frequency (in steps) for logging training progress
     log_freq = config.log_freq
 
+    # If using distributed training, ensure the sampler shuffles data correctly for the current epoch
     if config.distributed:
-        for d in train_loaders:
-            d.sampler.set_epoch(epoch)
-    train_loader = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
+        for loader in train_loaders:
+            loader.sampler.set_epoch(epoch) # Necessary for DistributedSampler reproducibility/shuffling
 
+    # Create a MetaLoader that aggregates data from different media-specific loaders
+    # It also handles skipping initial batches if resuming training part-way through an epoch
+    train_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
+
+    # Get the underlying model instance, unwrapping it from DDP if necessary
     model_without_ddp = model.module if config.distributed else model
-    iterator = metric_logger.log_every(train_loader, log_freq, header)
+    # Wrap the aggregated data loader with the metric logger to enable periodic logging
+    iterator = metric_logger.log_every(train_loader_agg, log_freq, header)
+
+    # --- Training Loop Start ---
+    # Iterate over batches provided by the MetaLoader
     for i, (media_type, (image, text, idx)) in enumerate(iterator):
-        image = image.to(device, non_blocking=True)
-        idx = idx.to(device, non_blocking=True)
+        # Move input data to the designated compute device
+        image = image.to(device, non_blocking=True) # Use non_blocking for potential speedup with pinned memory
+        idx = idx.to(device, non_blocking=True)     # Index, potentially used for contrastive learning negative sampling
+        # Tokenize text data and move it to the device
         text_input = tokenizer(text).to(device)
 
+        # Enable automatic mixed precision context if configured
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
+            # Forward pass: Feed data through the model to get predictions and calculate losses
             loss_dict = model(image, text_input, idx=idx)
-            loss = sum(loss_dict.values())
+            # Calculate the total loss by summing the individual weighted loss components
+            # Note: Loss weights are typically applied within the model's forward or criterion
+            total_loss = sum(loss_dict.values())
 
+        # --- Backpropagation and Optimization ---
+        # Check if using DeepSpeed for optimized distributed training
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            model.backward(loss)
-            model.step()
+            # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
+            model.backward(total_loss) # Use DeepSpeed's backward method
+            model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
         else:
+            # Standard PyTorch / AMP training step
+            # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
             if not config.use_half_precision or config.get('use_bf16', True):
-                optimizer.zero_grad()
-                loss.backward()
+                # --- Standard Precision or BFloat16 ---
+                optimizer.zero_grad() # Reset gradients from previous step
+                total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
+                # Apply gradient clipping if specified in the config to prevent exploding gradients
                 if config.optimizer.max_grad_norm > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                optimizer.step()
-                scheduler.step()
+                optimizer.step()      # Update model parameters based on computed gradients
+                scheduler.step()      # Update learning rate according to the schedule
             else:
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
+                # --- Float16 Mixed Precision with GradScaler ---
+                optimizer.zero_grad() # Reset gradients
+                # Scale the loss before backpropagation to prevent gradient underflow with float16
+                scaler.scale(total_loss).backward()
+                # Apply gradient clipping if specified (must unscale gradients first)
                 if config.optimizer.max_grad_norm > 0:
-                    scaler.unscale_(optimizer)
+                    scaler.unscale_(optimizer) # Unscale gradients before clipping
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                # scaler.step() first unscales gradients, checks for inf/NaNs, then calls optimizer.step()
                 scaler.step(optimizer)
+                # scaler.update() adjusts the scaling factor for the next iteration
                 scaler.update()
-                scheduler.step()
+                scheduler.step()      # Update learning rate
 
-        # logging
-        for name in loss_names:
-            value = loss_dict[name]
-            value = value if isinstance(value, float) else value.item()
-            metric_logger.update(**{f"{media_type}-{name}": value})
+        # --- Logging Metrics ---
+        # Update metric logger with the values of individual loss components for the current batch
+        for loss_name in active_loss_names:
+            loss_value = loss_dict[loss_name]
+            # Ensure value is a standard Python number for logging
+            loss_value = loss_value if isinstance(loss_value, float) else loss_value.item()
+            metric_logger.update(**{f"{media_type}-{loss_name}": loss_value}) # Log loss per media type
+        # Update metric logger with the current learning rate and model temperature
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(temperature=model_without_ddp.temp.item())
 
+        # Log aggregated metrics to Weights & Biases (wandb) periodically if enabled
         if is_main_process() and config.wandb.enable and global_step % log_freq == 0:
-            logs = metric_logger.get_global_avg_dict()
-            log_dict_to_wandb(logs, step=global_step, prefix="train/")
+            # Get the globally averaged metrics from the logger (synchronized across processes if distributed)
+            averaged_logs = metric_logger.get_global_avg_dict()
+            # Send the logs to wandb, associated with the current global step
+            log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
 
+        # Increment the global step counter
         global_step += 1
 
+        # Log Step Info
+        logger.info(f"Training -- Step [{global_step:,}]")
+
+        # --- Debugging Hooks ---
+        # Optional early termination conditions for debugging
         if config.debug and global_step % 20 == 0:
-            logger.info("debug mode, break training loop")
+            logger.info("Debug mode: breaking training loop early (step condition).")
+            break
+        if config.debug and global_step % (2 * log_freq + 3) == 0: # Another arbitrary break condition
+            logger.info("Debug mode: breaking training loop early (log freq condition).")
             break
 
-        if config.debug and global_step % (2 * log_freq + 3) == 0:
-            logger.info("debug mode, break training loop")
-            break
-
+        # --- Iteration-based Checkpointing ---
+        # Save a checkpoint at specified step intervals if `save_iter` > 0
         if config.get('save_iter', 0) and global_step % config.save_iter == 0:
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                tag = f"ckpt_iter{global_step:02d}.pth"
-                model.save_checkpoint(config.output_dir, tag=tag, save_latest=False, exclude_frozen_parameters=True)
-            elif is_main_process():
+                # DeepSpeed handles checkpoint saving logic
+                checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
+                # Exclude frozen parameters to save space if needed
+                model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
+            elif is_main_process(): # Only the main process saves checkpoints in standard DDP
+                # Get the model's state dictionary
                 state_dict = model_without_ddp.state_dict()
-                param_grad_dict = {
-                    k: v.requires_grad for (k, v) in model_without_ddp.named_parameters()
+                # Identify parameters that are frozen (do not require gradients)
+                param_requires_grad_dict = {
+                    name: param.requires_grad for (name, param) in model_without_ddp.named_parameters()
                 }
-                for k in list(state_dict.keys()):
-                    if k in param_grad_dict.keys() and not param_grad_dict[k]:
-                        # delete parameters that do not require gradient
-                        logger.info(f"Not saving {k}")
-                        del state_dict[k]
+                # Create a list of keys corresponding to frozen parameters
+                keys_to_remove = []
+                for param_name in state_dict.keys():
+                    if param_name in param_requires_grad_dict and not param_requires_grad_dict[param_name]:
+                        keys_to_remove.append(param_name)
+                # Remove frozen parameters from the state dictionary before saving
+                if keys_to_remove:
+                    logger.info(f"Removing {len(keys_to_remove)} frozen parameters from checkpoint: {keys_to_remove}")
+                    for param_name in keys_to_remove:
+                        del state_dict[param_name]
+
+                # Assemble the checkpoint object including model, optimizer, scheduler states, etc.
                 save_obj = {
                     "model": state_dict,
                     "optimizer": optimizer.state_dict(),
                     "scheduler": scheduler.state_dict(),
-                    "scaler": scaler.state_dict(),
-                    "config": config,
-                    "epoch": epoch,
-                    "global_step": global_step,
+                    "scaler": scaler.state_dict(), # Important for resuming AMP training
+                    "config": config,             # Save config for reproducibility
+                    "epoch": epoch,               # Current epoch
+                    "global_step": global_step,   # Current step
                 }
-                torch.save(save_obj, join(config.output_dir, f"ckpt_iter{global_step:02d}.pth"))
+                # Define the checkpoint filename
+                checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:02d}.pth")
+                # Save the checkpoint object to disk
+                torch.save(save_obj, checkpoint_filename)
+                logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
+    # --- Training Loop End ---
 
-    # gather the stats from all processes
+    # Synchronize metrics across all distributed processes before logging final epoch stats
     metric_logger.synchronize_between_processes()
-    logger.info(f"Averaged stats: {metric_logger.global_avg()}")
+    # Log the averaged metrics for the completed epoch
+    logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
+    # Return the updated global step count
     return global_step
 
 

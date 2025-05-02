@@ -90,7 +90,7 @@ image = (
     )
     .run_commands(
         "cd /root && git clone https://github.com/qingy1337/IV2.git",
-        "cd /root/IV2 && git checkout adapter",
+        "cd /root/IV2 && git checkout window",
         # "" # <-- Todo: PREPARE DATASET
     )
     .run_commands(
