@@ -114,7 +114,7 @@ class InternVideo2_CLIP_small(nn.Module):
         vision_embeds = self.encode_vision(image)
         text_embeds = self.encode_text(text)
 
-        # VTC loss
+        # Video-text contrastive (VTC) loss
         loss_vtc = self.clip_loss.vtc_loss(
             vision_embeds, text_embeds, idx, self.temp, all_gather=True
         )

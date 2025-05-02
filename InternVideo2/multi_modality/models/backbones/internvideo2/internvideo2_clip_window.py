@@ -45,6 +45,15 @@ class WindowInternVideo2(InternVideo2):
             x: Input frame [B, C, H, W] or sequence [B, C, T, H, W].
             force_full_forward: Force full forward pass.
             use_image: Passed on to the InternVideo2.forward() function (if it's a full forward).
+
+        >> force_full_forward == True:
+            - 8 frames will be added to the frame_buffer.
+            - The embedding for those 8 frames will be calculated using the original forward function.
+
+        >> force_full_forward == False:
+            - Function expects [B, C, H, W] shape.
+            - The new (singular) frame will be added to the frame buffer.
+            - The embedding is calculated via the UpdateTransformer.
         """
         # Check input shape
         if len(x.shape) == 4:  # Single frame
@@ -68,7 +77,10 @@ class WindowInternVideo2(InternVideo2):
             self.current_embedding = super().forward(frames, use_image=use_image)
 
             # log(f"Resetting the state... (self.current_embedding is {self.current_embedding.shape})")
-            self.reset_state(reset_current_embedding = False)
+            # ┌────────────────────────┐
+            # │ We don't need to reset the state here. │
+            # └────────────────────────┘
+            # self.reset_state(reset_current_embedding = False)
         else:
             # Do update with new frame(s)
             for i in range(T):
