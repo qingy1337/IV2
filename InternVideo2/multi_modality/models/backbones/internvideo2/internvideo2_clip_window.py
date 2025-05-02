@@ -32,12 +32,38 @@ class WindowInternVideo2(InternVideo2):
         self.reset_state()
 
     def reset_state(self, reset_current_embedding = True):
+        """
+        Resets the internal state of the WindowInternVideo2 model.
+
+        This includes:
+        - Resetting the frame count to 0.
+        - Optionally resetting the current embedding to None (if `reset_current_embedding` is True).
+        - Clearing the frame buffer.
+
+        Args:
+            reset_current_embedding (bool): Whether to reset the current embedding.
+                                            Defaults to True. If False, the current embedding is preserved.
+        """
         self.frame_count = 0
 
         if reset_current_embedding:
             self.current_embedding = None
+
         # Buffer to collect frames until we have 8
         self.frame_buffer = []
+
+    def pop_last_frame(self):
+        """
+        Removes and returns the last frame from the frame buffer, if it exists.
+
+        Returns:
+            torch.Tensor: The last frame in the buffer (shape [B, C, H, W]) or None if the buffer is empty.
+        """
+        if len(self.frame_buffer) > 0:
+            last_frame = self.frame_buffer.pop()
+            return last_frame
+        else:
+            return None
 
     def forward(self, x, use_image = False, force_full_forward=False):
         """
@@ -46,14 +72,17 @@ class WindowInternVideo2(InternVideo2):
             force_full_forward: Force full forward pass.
             use_image: Passed on to the InternVideo2.forward() function (if it's a full forward).
 
-        >> force_full_forward == True:
-            - 8 frames will be added to the frame_buffer.
-            - The embedding for those 8 frames will be calculated using the original forward function.
-
-        >> force_full_forward == False:
-            - Function expects [B, C, H, W] shape.
-            - The new (singular) frame will be added to the frame buffer.
-            - The embedding is calculated via the UpdateTransformer.
+        +------------------------------------------------------------------------------------+
+        | force_full_forward == True:                                                        |
+        |   > 8 frames will be added to the frame_buffer.                                    |
+        |   > The embedding for those 8 frames will be calculated using the original forward |
+        |     function.                                                                      |
+        +------------------------------------------------------------------------------------+
+        | force_full_forward == False:                                                       |
+        |   > Function expects [B, C, H, W] shape.                                           |
+        |   > The new (singular) frame will be added to the frame buffer.                    |
+        |   > The embedding is calculated via the UpdateTransformer.                         |
+        +------------------------------------------------------------------------------------+
         """
         # Check input shape
         if len(x.shape) == 4:  # Single frame
@@ -65,22 +94,17 @@ class WindowInternVideo2(InternVideo2):
         # Add new frame(s) to buffer
         self.frame_buffer.extend([x[:,:,i] for i in range(T)])
 
-        # log(f"Adding {T} frames. x is of shape {x.shape}")
-
-        # If we have 8 frames or force_full_forward
-        if force_full_forward or len(self.frame_buffer) >= 8:
-            # Take last 8 frames and do full forward
+        if force_full_forward: # Full forward pass with the original model
             frames = torch.stack(self.frame_buffer[-8:], dim=2)  # [B, C, 8, H, W]
-
-            # log("Using the last 8 frames in a Full Forward Pass")
 
             self.current_embedding = super().forward(frames, use_image=use_image)
 
-            # log(f"Resetting the state... (self.current_embedding is {self.current_embedding.shape})")
-            # ┌────────────────────────┐
-            # │ We don't need to reset the state here. │
-            # └────────────────────────┘
-            # self.reset_state(reset_current_embedding = False)
+            # ───────────────────────────────────────
+            #   We don't need to reset the state here, at least for training.
+            #
+            #   Resetting the state looks like:
+            #       self.reset_state(reset_current_embedding = False)
+            # ───────────────────────────────────────
         else:
             # Do update with new frame(s)
             for i in range(T):
@@ -95,7 +119,59 @@ class WindowInternVideo2(InternVideo2):
                 )
                 self.frame_count += 1
 
-        # log(f"Returning current_embedding: {self.current_embedding.shape}")
+
+        return self.current_embedding
+
+    def forward_inference(self, x, use_image = False, force_full_forward=False):
+        """
+        Args:
+            x: Input frame [B, C, H, W] or sequence [B, C, T, H, W].
+            force_full_forward: Force full forward pass.
+            use_image: Passed on to the InternVideo2.forward() function (if it's a full forward).
+
+        +------------------------------------------------------------------------------------+
+        | force_full_forward == True:                                                        |
+        |   > 8 frames will be added to the frame_buffer.                                    |
+        |   > The embedding for those 8 frames will be calculated using the original forward |
+        |     function.                                                                      |
+        +------------------------------------------------------------------------------------+
+        | force_full_forward == False:                                                       |
+        |   > Function expects [B, C, H, W] shape.                                           |
+        |   > The new (singular) frame will be added to the frame buffer.                    |
+        |   > The embedding is calculated via the UpdateTransformer.                         |
+        +------------------------------------------------------------------------------------+
+        """
+        # Check input shape
+        if len(x.shape) == 4:  # Single frame
+            B, C, H, W = x.shape
+            x = x.unsqueeze(2)  # Add T dimension [B, C, 1, H, W]
+
+        B, C, T, H, W = x.shape
+
+        # Add new frame(s) to buffer
+        self.frame_buffer.extend([x[:,:,i] for i in range(T)])
+
+        # If we have 8 frames or force_full_forward
+        if force_full_forward or len(self.frame_buffer) >= 8:
+            # Take last 8 frames and do full forward
+            frames = torch.stack(self.frame_buffer[-8:], dim=2)  # [B, C, 8, H, W]
+
+            self.current_embedding = super().forward(frames, use_image=use_image)
+
+            self.reset_state(reset_current_embedding = False)
+        else:
+            # Do update with new frame(s)
+            for i in range(T):
+                frame = x[:,:,i:i+1]  # [B, C, 1, H, W]
+                new_frame_tokens = self.patch_embed(frame)  # [B, 1, L, C]
+                B, T, L, C = new_frame_tokens.shape
+                new_frame_tokens = new_frame_tokens.view([B, T * L, C])
+
+                self.current_embedding = self.update_transformer(
+                    self.current_embedding,
+                    new_frame_tokens
+                )
+                self.frame_count += 1
 
         return self.current_embedding
 
