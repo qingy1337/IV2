@@ -62,6 +62,9 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
     Returns:
         list: A list of frame indices.
     """
+
+    max_num_frames = 100 # >> MANUAL OVERRIDE RRR RRRR RRR RRR
+
     if sample == 'all':
         logger.info(f"Video Utils --- Sampling All with {max_num_frames} max frames")
         frame_indices = list(range(vlen))
