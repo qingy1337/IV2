@@ -13,8 +13,8 @@ stop_key = None
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 256      # Use 4 for demonstration
-batch_size_test = 256 # Use 4 for demonstration
+batch_size = 64      # Use 4 for demonstration
+batch_size_test = 64 # Use 4 for demonstration
 max_txt_l = 32
 
 inputs = dict(
@@ -90,7 +90,7 @@ optimizer = dict(
     lr=1e-5,
     opt_betas=[0.9, 0.98],  # default
     weight_decay=0.2,
-    max_grad_norm=0.7,  # requires a positive float, use -1 to disable
+    max_grad_norm=0.8,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
     different_lr=dict(enable=False, module_names=[], lr=1e-5),
 )
@@ -112,7 +112,7 @@ gradient_checkpointing = True
 
 # ========================= wandb ==========================
 wandb = dict(
-    enable=False,
+    enable=True,
     entity="qingy2019-conker-mobile-inc-",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
     project="window_iv2",  # setup in your command line
 )
