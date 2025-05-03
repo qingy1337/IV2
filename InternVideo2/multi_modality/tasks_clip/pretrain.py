@@ -65,7 +65,7 @@ def train(
     metric_logger.add_meter("lr", SmoothedValue(window=100, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=100, fmt="{value:.4f}"))
     # Determine the names of the active loss components based on non-zero weights in the config
-    active_loss_names = ["loss_" + k for k, v in config.criterion.loss_weight.items() if v != 0]
+    active_loss_names = ["loss_mse"]
 
     # Identify the different types of media (e.g., 'image', 'video') present in the training loaders
     media_types = get_media_types(train_loaders)
@@ -99,7 +99,7 @@ def train(
     # --- Training Loop Start ---
     # Iterate over batches provided by the MetaLoader
 
-    MODEL_MAX_FRAMES = 8
+    MODEL_MAX_FRAMES = config.num_frames
 
     for i, (media_type, (image, text, idx)) in enumerate(iterator):
         # Move input data to the designated compute device
