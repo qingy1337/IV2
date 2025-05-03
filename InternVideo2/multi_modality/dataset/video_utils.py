@@ -63,6 +63,7 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
         list: A list of frame indices.
     """
     if sample == 'all':
+        logger.info(f"Video Utils --- Sampling All with {max_num_frames} max frames")
         frame_indices = list(range(vlen))
         if max_num_frames > 0 and len(frame_indices) > max_num_frames:
             frame_indices = frame_indices[:max_num_frames]
