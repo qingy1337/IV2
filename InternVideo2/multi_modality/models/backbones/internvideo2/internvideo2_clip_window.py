@@ -72,17 +72,17 @@ class WindowInternVideo2(InternVideo2):
             force_full_forward: Force full forward pass.
             use_image: Passed on to the InternVideo2.forward() function (if it's a full forward).
 
-        +------------------------------------------------------------------------------------+
+        ,------------------------------------------------------------------------------------.
         | force_full_forward == True:                                                        |
         |   > 8 frames will be added to the frame_buffer.                                    |
         |   > The embedding for those 8 frames will be calculated using the original forward |
         |     function.                                                                      |
-        +------------------------------------------------------------------------------------+
+        |------------------------------------------------------------------------------------|
         | force_full_forward == False:                                                       |
         |   > Function expects [B, C, H, W] shape.                                           |
         |   > The new (singular) frame will be added to the frame buffer.                    |
         |   > The embedding is calculated via the UpdateTransformer.                         |
-        +------------------------------------------------------------------------------------+
+        `------------------------------------------------------------------------------------'
         """
         # Check input shape
         if len(x.shape) == 4:  # Single frame
@@ -129,17 +129,17 @@ class WindowInternVideo2(InternVideo2):
             force_full_forward: Force full forward pass.
             use_image: Passed on to the InternVideo2.forward() function (if it's a full forward).
 
-        +------------------------------------------------------------------------------------+
+        ,------------------------------------------------------------------------------------.
         | force_full_forward == True:                                                        |
         |   > 8 frames will be added to the frame_buffer.                                    |
         |   > The embedding for those 8 frames will be calculated using the original forward |
         |     function.                                                                      |
-        +------------------------------------------------------------------------------------+
+        |------------------------------------------------------------------------------------|
         | force_full_forward == False:                                                       |
         |   > Function expects [B, C, H, W] shape.                                           |
         |   > The new (singular) frame will be added to the frame buffer.                    |
         |   > The embedding is calculated via the UpdateTransformer.                         |
-        +------------------------------------------------------------------------------------+
+        `------------------------------------------------------------------------------------'
         """
         # Check input shape
         if len(x.shape) == 4:  # Single frame

@@ -98,6 +98,9 @@ def train(
 
     # --- Training Loop Start ---
     # Iterate over batches provided by the MetaLoader
+
+    MODEL_MAX_FRAMES = 8
+
     for i, (media_type, (image, text, idx)) in enumerate(iterator):
         # Move input data to the designated compute device
         image = image.to(device, non_blocking=True) # Use non_blocking for potential speedup with pinned memory
@@ -108,7 +111,54 @@ def train(
         # Enable automatic mixed precision context if configured
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             # Forward pass: Feed data through the model to get predictions and calculate losses
-            loss_dict = model(image, text_input, idx=idx)
+            # ,-----------------------------------------------------------------.
+            # | Assumption: media_type is video, image is shape [B, C, T, H, W] |
+            # `-----------------------------------------------------------------'
+
+            # Iterate over each frame in the video (time dimension)
+            B, C, T, H, W = image.shape
+
+            assert T >= MODEL_MAX_FRAMES, f"Video has shape {image.shape}, T should be >= {MODEL_MAX_FRAMES}."
+
+            model.vision_encoder.reset_state()
+
+            # Extract the first MODEL_MAX_FRAMES frames from the video.
+            num_frames = min(T, MODEL_MAX_FRAMES)
+            frames = image[:, :, :num_frames, :, :]
+
+            # Calculate full forward pass embedding from the vision encoder.
+            initial_embedding = model.vision_encoder(frames, force_full_forward = True)
+
+            # Store the total MSE loss, so that it can be averaged later.
+            total_mse = torch.tensor(0.0, device=image.device)  # Keeps gradient history
+            window_count = 0
+
+            # Skip the first MODEL_MAX_FRAMES frames
+            for t in range(MODEL_MAX_FRAMES, T):
+                frame = image[:, :, t, :, :]
+
+                # ,-----------------------------------.
+                # | frame now has shape [B, C, H, W]  |
+                # `-----------------------------------'
+
+                window_embedding = model.vision_encoder(frame) # New embedding using the UpdateTransformer
+
+                with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
+                    model.vision_encoder.reset_state()
+                    full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True)
+
+                loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
+
+                total_mse += loss
+
+                window_count += 1
+
+            loss_mse = total_mse / window_count # Average MSE Loss over sliding windows.
+
+            loss_dict = dict(
+                loss_mse = loss_mse
+            )
+
             # Calculate the total loss by summing the individual weighted loss components
             # Note: Loss weights are typically applied within the model's forward or criterion
             total_loss = sum(loss_dict.values())
