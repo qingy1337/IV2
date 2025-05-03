@@ -23,7 +23,7 @@ inputs = dict(
         num_frames="${num_frames}",
         sample_type="all",
         num_frames_test="${num_frames_test}",
-        sample_type_test="middle",
+        sample_type_test="all",
         random_aug=False,
     ),
     max_txt_l=dict(image="${max_txt_l}", video="${max_txt_l}"),
