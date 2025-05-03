@@ -47,7 +47,7 @@ def get_frame_indices_by_fps():
     pass
 
 
-def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps=1, max_num_frames=-1):
+def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps=1, max_num_frames=100):
     """
     Returns a list of frame indices.
 
