@@ -20,6 +20,8 @@ from utils.config_utils import setup_main
 from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
 
+from models.backbones.internvideo2.internvideo2_clip_vision import InternVideo2_CLIP_small
+
 logger = logging.getLogger(__name__)
 
 def train(

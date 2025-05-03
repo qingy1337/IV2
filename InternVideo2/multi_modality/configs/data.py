@@ -176,8 +176,9 @@ available_corpus["vatex_en_ret_val"] = dict(
 )
 
 available_corpus["k400_act_val"] = dict(
-    anno_path="your_path",
-    data_root="",
+    anno_path="/root/IV2/InternVideo2/multi_modality/data_test/smol_test.json",
+    data_root="/root/IV2/InternVideo2/multi_modality/data_test/",
+    media_type="video",
     is_act_rec=True,
 )
 
