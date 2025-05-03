@@ -5,6 +5,7 @@ from .internvideo2_stage2 import InternVideo2_Stage2
 
 __all__ = [
     'InternVideo2_CLIP',
-    'InternVideo2_Stage2', 
+    'InternVideo2_CLIP_small',
+    'InternVideo2_Stage2',
     # 'InternVideo2_Stage2_audio'
 ]
