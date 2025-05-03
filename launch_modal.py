@@ -64,13 +64,14 @@ image = (
         "HF_TOKEN": "lIpxcDdlfsJzTIAqZZAvGUKaYdlyOPrpLI_fh"[::-1]
     })
     .run_commands(
-        "pip uninstall -y torch torchvision",
+        "pip uninstall -y torch torchvision"
+    )
+    .run_commands(
         "pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121"
     )
     # clone & build
     .pip_install(
         'deepspeed',
-        'flash-attn',
         'timm',
         'open_clip_torch',
         'scipy',
@@ -80,10 +81,14 @@ image = (
         'decord',
         'imageio',
         'easydict',
-        'termcolor'
+        'termcolor',
+        'wheel'
     )
     .run_commands(
         "pip install torchaudio --no-deps --index-url https://download.pytorch.org/whl/cu121"
+    )
+    .run_commands(
+        'pip install flash-attn --no-build-isolation'
     )
     .run_commands(
         f"echo {time.time()}"

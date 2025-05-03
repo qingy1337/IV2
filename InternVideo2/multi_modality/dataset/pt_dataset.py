@@ -51,14 +51,15 @@ class ImgTxtPtTrainDataset(BaseDataset):
 
         if self.use_prompt and self.caption_augmentation is not None:
             raise NotImplementedError("You can't use prompt because of multiple captions!")
-        
+
 
         if '.json' in self.label_file:
             logger.info(f"Loading json file {self.label_file}")
 
             if get_local_rank() == 0:  # Only one rank need to read the file
-                with io.BytesIO(self.client.get(self.label_file)) as f:
-                # with open(self.label_file, 'r') as f:
+                # with io.BytesIO(self.client.get(self.label_file)) as f:
+                with open(self.label_file, 'r') as f:
+                    logger.info("Loading from local file!")
                     annos = json.load(f)
 
                 if ann_file.get("jump_filter", False):
@@ -70,12 +71,12 @@ class ImgTxtPtTrainDataset(BaseDataset):
                         if self.media_type == "audio_video" and self.caption_augmentation.caption_sample_type == 'avs_all':
                             for anno in annos:
                                 ok = True
-                                if not anno['video'].endswith('.mp4'): 
+                                if not anno['video'].endswith('.mp4'):
                                     ok = False
                                 for k in anno.keys():
                                     if "caption" in k and 'asr' not in k:
                                         tmp_c = pre_text(anno[k])
-                                        if len(tmp_c.split()) < self.min_caption_length: 
+                                        if len(tmp_c.split()) < self.min_caption_length:
                                             ok = False
                                             break
                                 if ok:
@@ -86,7 +87,7 @@ class ImgTxtPtTrainDataset(BaseDataset):
                                     caption_key = "captions"
                                 else:
                                     caption_key = "caption"
-                                    
+
                                 assert type(anno[caption_key]) is list, type(anno[caption_key])
                                 caption_list = []
                                 for c in anno[caption_key]:
@@ -98,7 +99,7 @@ class ImgTxtPtTrainDataset(BaseDataset):
                                     new_annos.append(anno)
                         else:
                             raise NotImplementedError(ann_file)
-                        
+
                         logger.info(f"Num samples: {len(annos)}")
                         logger.info(f"Num samples not too short: {len(new_annos)} min_caption_length={self.min_caption_length}")
                         annos = new_annos
@@ -113,7 +114,7 @@ class ImgTxtPtTrainDataset(BaseDataset):
                     raise NotImplementedError
             else:
                 annos = []
-            
+
             self.anno = TorchShmSerializedList(annos)
             self.num_examples = len(self.anno)
             logger.info(f"num_examples: {self.num_examples}")
@@ -150,7 +151,7 @@ class ImgTxtPtTrainDataset(BaseDataset):
             else:
                 raise NotImplementedError
         return caption
-    
+
     def get_anno(self, index):
         assert self.media_type == 'image', self.media_type
         anno = {"caption": self.get_caption(index)}
@@ -214,7 +215,7 @@ class VidTxtPtTrainDataset(ImgTxtPtTrainDataset):
 
         self.is_paragraph_retrieval = ann_file.get("is_paragraph_retrieval", False)
         self.read_clip_from_video = ann_file.get("read_clip_from_video", False)
-        
+
         if self.is_paragraph_retrieval:
             raise NotImplementedError
 
@@ -227,14 +228,14 @@ class VidTxtPtTrainDataset(ImgTxtPtTrainDataset):
             anno["video_end_frame"] = self.anno[index]["video_end_frame"]
         if self.use_prompt:
             anno["caption"] = random.choice(self.prompt).format(anno["caption"])
-        
+
         return anno
 
     def __getitem__(self, index):
         try:
             ann = self.get_anno(index)
             caption = self.pre_caption(ann["caption"])
-            
+
             if self.read_clip_from_video:
                 data_path = {
                     "video": ann["video"],
@@ -248,7 +249,7 @@ class VidTxtPtTrainDataset(ImgTxtPtTrainDataset):
             video, index = self.load_and_transform_media_data(index, data_path)
 
             return video, caption, index
-        
+
         except Exception as e:
             logger.warning(f"Caught exception {e} when loading video {ann}")
             # raise e
@@ -264,7 +265,7 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
         self,
         ann_file,
         transform,
-        audio_sample_rate=16000, 
+        audio_sample_rate=16000,
         audio_reader_type='torchaudio',
         max_audio_length=10,
         num_frames=4,
@@ -292,13 +293,13 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
         if self.read_clip_from_video:
             anno["video_start_frame"] = self.anno[index]["video_start_frame"]
             anno["video_end_frame"] = self.anno[index]["video_end_frame"]
-        
+
         if "audio" in self.anno[index].keys():
             anno["audio"] = self.data_root_prefix + os.path.join(self.data_root, self.anno[index]["audio"])
 
         if self.use_prompt:
             anno["caption"] = random.choice(self.prompt).format(anno["caption"])
-        
+
         return anno
 
     def __getitem__(self, index):
@@ -310,7 +311,7 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
             if self.read_clip_from_video:
                 data_path["video_start_frame"] = ann["video_start_frame"]
                 data_path["video_end_frame"] = ann["video_end_frame"]
-            
+
             if "audio" in ann.keys():
                 data_path["read_audio_from_video"] = False
                 data_path["audio"] = ann["audio"]
@@ -318,9 +319,9 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
                 data_path["read_audio_from_video"] = self.read_audio_from_video
 
             data_path["read_clip_from_video"] = self.read_clip_from_video
-            
+
             media, index = self.load_and_transform_media_data(index, data_path)
-            self.now_tries = 0 
+            self.now_tries = 0
 
             audio = media[0]
             if audio is None and self.zero_audio_padding_for_video:
@@ -328,7 +329,7 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
                 media[0] = torch.zeros((998, 64), dtype=torch.float32)
 
             return media, caption, index
-        
+
         except Exception as e:
             # print(e)
             if self.num_tries < self.now_tries:
@@ -337,7 +338,7 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
                 self.now_tries += 1
             logger.warning(f"Caught exception {e} when loading audio-video {ann}")
             # logger.warning(f"Caught exception when loading audio-video {ann['video']}")
-            
+
             index = np.random.randint(0, len(self))
             return self.__getitem__(index)
 
@@ -345,8 +346,8 @@ class AudioVidTxtPtTrainDataset(VidTxtPtTrainDataset):
 class AudioTxtPtTrainDataset(BaseDataset):
     media_type = "audio"
 
-    def __init__(self, ann_file, transform, 
-                audio_sample_rate=16000, 
+    def __init__(self, ann_file, transform,
+                audio_sample_rate=16000,
                 audio_reader_type='torchaudio',
                 max_audio_length=10,
                 num_tries=3,
@@ -404,7 +405,7 @@ class AudioTxtPtTrainDataset(BaseDataset):
                                     caption_key = "captions"
                                 else:
                                     caption_key = "caption"
-                                    
+
                                 assert type(anno[caption_key]) is list, type(anno[caption_key])
                                 caption_list = []
                                 for c in anno[caption_key]:
@@ -416,7 +417,7 @@ class AudioTxtPtTrainDataset(BaseDataset):
                                     new_annos.append(anno)
                         else:
                             raise NotImplementedError(ann_file)
-                        
+
                         logger.info(f"Num samples: {len(annos)}")
                         logger.info(f"Num samples not too short: {len(new_annos)} min_caption_length={self.min_caption_length}")
                         annos = new_annos
@@ -431,7 +432,7 @@ class AudioTxtPtTrainDataset(BaseDataset):
                     raise NotImplementedError
             else:
                 annos = []
-            
+
             self.anno = TorchShmSerializedList(annos)
             self.num_examples = len(self.anno)
             logger.info(f"num_examples: {self.num_examples}")
@@ -460,7 +461,7 @@ class AudioTxtPtTrainDataset(BaseDataset):
             else:
                 raise NotImplementedError
         return caption
-    
+
     def get_anno(self, index):
         assert self.media_type == 'audio', self.media_type
         anno = {"caption": self.get_caption(index)}
@@ -475,7 +476,7 @@ class AudioTxtPtTrainDataset(BaseDataset):
             return pre_text(caption)
         else:
             raise NotImplementedError(caption)
-        
+
     def __getitem__(self, index):
         try:
             ann = self.get_anno(index)

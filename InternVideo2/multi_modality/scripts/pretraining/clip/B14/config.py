@@ -2,7 +2,7 @@ from configs.data import *
 from configs.model import *
 
 # ========================= data ==========================
-train_corpus = "data_25m"
+train_corpus = "smol_test"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
 test_file = dict(act_val=available_corpus["k400_act_val"])
 test_types = ["act_val"]
