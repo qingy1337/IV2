@@ -111,9 +111,16 @@ def train(
         # Enable automatic mixed precision context if configured
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
             # Forward pass: Feed data through the model to get predictions and calculate losses
+
             # ,-----------------------------------------------------------------.
-            # | Assumption: media_type is video, image is shape [B, C, T, H, W] |
+            # | Assumption: media_type is video, image is shape [B, T, C, H, W] |
             # `-----------------------------------------------------------------'
+
+            image = image.permute(0, 2, 1, 3, 4)
+
+            # ,------------------------------------.
+            # | Now image is shape [B, C, T, H, W] |
+            # `------------------------------------'
 
             # Iterate over each frame in the video (time dimension)
             B, C, T, H, W = image.shape
