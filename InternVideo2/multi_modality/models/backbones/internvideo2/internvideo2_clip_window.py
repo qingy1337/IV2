@@ -236,7 +236,8 @@ class UpdateLayer(nn.Module):
         self.cross_attn1 = nn.MultiheadAttention(
             embed_dim=embed_dim,
             num_heads=num_heads,
-            bias=qkv_bias
+            bias=qkv_bias,
+            batch_first=True  # Add this parameter
         )
 
         # Cross attention to new tokens
@@ -244,7 +245,8 @@ class UpdateLayer(nn.Module):
         self.cross_attn2 = nn.MultiheadAttention(
             embed_dim=embed_dim,
             num_heads=num_heads,
-            bias=qkv_bias
+            bias=qkv_bias,
+            batch_first=True  # Add this parameter
         )
 
         # MLP block
@@ -257,19 +259,20 @@ class UpdateLayer(nn.Module):
         )
 
     def forward(self, x, prev_embedding, new_tokens):
-        # First attend to previous embedding
-        x = x + self.cross_attn1(
-            self.norm1(x),
-            prev_embedding,
-            prev_embedding
-        )[0]
+        # Apply normalization first
+        query1 = self.norm1(x)
+        key1 = value1 = self.norm1(prev_embedding)
 
-        # Then attend to new tokens
-        x = x + self.cross_attn2(
-            self.norm2(x),
-            new_tokens,
-            new_tokens
-        )[0]
+        # First cross attention
+        attn_output1, _ = self.cross_attn1(query1, key1, value1)
+        x = x + attn_output1
+
+        # Second cross attention
+        query2 = self.norm2(x)
+        key2 = value2 = self.norm2(new_tokens)
+
+        attn_output2, _ = self.cross_attn2(query2, key2, value2)
+        x = x + attn_output2
 
         # MLP
         x = x + self.mlp(self.norm3(x))
