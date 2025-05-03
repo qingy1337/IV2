@@ -48,7 +48,26 @@ def get_frame_indices_by_fps():
 
 
 def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps=1, max_num_frames=-1):
-    if sample in ["rand", "middle"]: # uniform sampling
+    """
+    Returns a list of frame indices.
+
+    Args:
+        num_frames (int): The desired number of frames (only relevant for sampling).
+        vlen (int): The total number of frames in the video.
+        sample (str):  Sampling strategy.  'all' returns all frames. Other options exist in the original function.
+        fix_start (int, optional): Fix start frame for uniform sampling. Defaults to None.
+        input_fps (int, optional): Input video FPS. Defaults to 1.
+        max_num_frames (int, optional): Maximum number of frames to return. Defaults to -1 (no limit).
+
+    Returns:
+        list: A list of frame indices.
+    """
+    if sample == 'all':
+        frame_indices = list(range(vlen))
+        if max_num_frames > 0 and len(frame_indices) > max_num_frames:
+            frame_indices = frame_indices[:max_num_frames]
+        return frame_indices
+    elif sample in ["rand", "middle"]: # uniform sampling
         acc_samples = min(num_frames, vlen)
         # split the video into `acc_samples` intervals, and sample from each interval.
         intervals = np.linspace(start=0, stop=vlen, num=acc_samples + 1).astype(int)
@@ -104,7 +123,7 @@ def read_frames_av(video_path, num_frames, sample='rand', fix_start=None, max_nu
 
 
 def read_frames_gif(
-        video_path, num_frames, sample='rand', fix_start=None, 
+        video_path, num_frames, sample='rand', fix_start=None,
          max_num_frames=-1, client=None, trimmed30=False,
     ):
     if 's3://' in video_path:
@@ -131,7 +150,7 @@ def read_frames_gif(
 
 
 def read_frames_decord(
-        video_path, num_frames, sample='rand', fix_start=None, 
+        video_path, num_frames, sample='rand', fix_start=None,
         max_num_frames=-1, client=None, trimmed30=False
     ):
     num_threads = 1 if video_path.endswith('.webm') else 0 # make ssv2 happy
@@ -140,11 +159,11 @@ def read_frames_decord(
         # print(f"\033[1;31;40m {video_path} ok: {video_bytes is None} \033[0m")
         if video_bytes is None:
             logger.warning(f"Failed to load {video_path}")
-        video_reader = VideoReader(io.BytesIO(video_bytes), num_threads=num_threads) 
+        video_reader = VideoReader(io.BytesIO(video_bytes), num_threads=num_threads)
     else:
         video_reader = VideoReader(video_path, num_threads=num_threads)
     vlen = len(video_reader)
- 
+
     fps = video_reader.get_avg_fps()
     duration = vlen / float(fps)
 
@@ -164,7 +183,7 @@ def read_frames_decord(
 
 
 def read_frames_img(
-        video_path, num_frames, sample='rand', fix_start=None, 
+        video_path, num_frames, sample='rand', fix_start=None,
         max_num_frames=-1, client=None, trimmed30=False
     ):
     img_list=[]
