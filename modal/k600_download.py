@@ -44,11 +44,14 @@ def download_k600():
     os.chdir("/root/k600")
 
     import shutil
-    shutil.rmtree("kinetics-dataset", ignore_errors=True)
 
-    # Run the commands
-    subprocess.run(["git", "clone", "https://github.com/qingy1337/kinetics-dataset.git"], check=True)
+    if not os.path.exists('kinetics-dataset'):
+        subprocess.run(["git", "clone", "https://github.com/qingy1337/kinetics-dataset.git"], check=True)
+
     os.chdir("/root/k600/kinetics-dataset")
+
+    subprocess.run(['git', 'pull'], check=True)
+
     subprocess.run(["bash", "./k600_downloader.sh"], check=True)
     subprocess.run(["bash", "./k600_extractor.sh"], check=True)
 
