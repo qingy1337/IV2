@@ -47,16 +47,41 @@ def download_k600():
     subprocess.run(['git', 'pull'], check=True)
 
     # Move removed_actions.txt to the k600 subdirectory
-    subprocess.run(['mv', 'removed_actions.txt', './k600/'], check=True)
+    if os.path.exists('removed_actions.txt'):
+        subprocess.run(['mv', 'removed_actions.txt', './k600/'], check=True)
+
+    # Move quality_check.py to the k600 subdirectory
+    if os.path.exists('quality_check.py'):
+        subprocess.run(['mv', 'quality_check.py', './k600/'], check=True)
 
     # Change to the k600 directory
     os.chdir("/root/k600/kinetics-dataset/k600")
 
     # Run the grep | tr | xargs command using shell=True
     subprocess.run(
-        'grep -v "^$" removed_actions.txt | tr "\n" "\0" | xargs -0 -I {} rm -rf "./train/train/{}/"',
+        'grep -v "^$" removed_actions.txt | tr "\\n" "\\0" | xargs -0 -I {} rm -rf "./train/train/{}/"',
         shell=True,
         check=True
+    )
+
+    subprocess.run(
+        'echo Removed redundant actions!',
+        shell=True,
+        check=True,
+    )
+
+    subprocess.run(['python', 'quality_check.py'], check=True)
+
+    subprocess.run(
+        'echo Quality check passed!',
+        shell=True,
+        check=True,
+    )
+
+    subprocess.run(
+        'echo Clean up complete!',
+        shell=True,
+        check=True,
     )
 
     # Commit the volume changes (if needed by your framework)
