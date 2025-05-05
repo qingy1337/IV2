@@ -111,7 +111,7 @@ k600_volume = modal.Volume.from_name("k600")
 
 app = modal.App(image=image, name="Window InternVideo2 Training")
 
-@app.function(volumes={"/root/k600": k600_volume}, gpu="A100-40GB:1", timeout=86_400)  # 24 hour timeout
+@app.function(volumes={"/root/k600": k600_volume}, gpu="A100-80GB:1", timeout=86_400)  # 24 hour timeout
 def runwithgpu():
     token = secrets.token_urlsafe(13)
     with modal.forward(8888) as tunnel:
