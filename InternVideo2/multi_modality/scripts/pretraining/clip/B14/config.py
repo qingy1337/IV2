@@ -13,7 +13,7 @@ stop_key = None
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 64      # Use 4 for demonstration
+batch_size = 16      # Use 4 for demonstration
 batch_size_test = 64 # Use 4 for demonstration
 max_txt_l = 32
 
