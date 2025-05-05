@@ -13,7 +13,7 @@ stop_key = None
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 16      # Use 4 for demonstration
+batch_size = 4      # Use 4 for demonstration
 batch_size_test = 64 # Use 4 for demonstration
 max_txt_l = 32
 
@@ -95,7 +95,7 @@ optimizer = dict(
     different_lr=dict(enable=False, module_names=[], lr=1e-5),
 )
 
-scheduler = dict(sched="cosine", epochs=3, min_lr_multi=0.01, warmup_epochs=0.6)
+scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.0001)
 
 evaluate = False
 deep_fusion = False
