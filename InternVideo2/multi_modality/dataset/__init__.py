@@ -80,12 +80,20 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
     else:
         raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
-    
+
     print(f"\033[31m dataset_type: {dataset_type} media_type: {media_type} dataset_cls: {dataset_cls}\033[0m")
     logger.info(f"dataset_type: {dataset_type} media_type: {media_type} dataset_cls: {dataset_cls}")
 
     return dataset_cls
 
+# Define these functions at the module level (outside any other function)
+def to_float_and_normalize(x):
+    return x.float().div(255.0)
+
+def identity_transform(x):
+    return x
+
+# Then modify your get_train_transform function
 def get_train_transform(config, train_file):
     vision_enc_name = config.model.vision_encoder.name
     if "internvideo" in vision_enc_name or "vit" in vision_enc_name or "umt" in vision_enc_name:
@@ -99,14 +107,14 @@ def get_train_transform(config, train_file):
 
     normalize = transforms.Normalize(mean, std)
 
-    # loaded images and videos are torch.Tensor of torch.uint8 format,
-    # ordered as (T, 1 or 3, H, W) where T=1 for image
-    type_transform = transforms.Lambda(lambda x: x.float().div(255.0))
+    # Use the defined function instead of lambda
+    type_transform = transforms.Lambda(to_float_and_normalize)
 
     if config.inputs.video_input.random_aug:
         aug_transform = transforms.RandAugment()
     else:
-        aug_transform = transforms.Lambda(lambda x: x)
+        # Use the defined function instead of lambda
+        aug_transform = transforms.Lambda(identity_transform)
 
     train_transform = transforms.Compose(
         [
@@ -200,7 +208,7 @@ def create_dataset(dataset_type, config):
 
         train_datasets = []
         for m in train_media_types:
-            
+
             # dataset of the same media_type will be mixed in a single Dataset object
             _train_files = [e for e in train_files if get_media_type(e) == m]
 
@@ -270,23 +278,23 @@ def create_dataset(dataset_type, config):
             dataset_kwargs.update(audio_only_dataset_kwargs_train)
         else:
             raise NotImplementedError(config.train_file.media_type)
-        
+
         logger.info(f"dataset_type={dataset_type}, train_file={config.train_file}")
         logger.info(dataset_kwargs)
         logger.info('train_transform:')
         logger.info(str(train_transform))
 
         return [dataset_cls(**dataset_kwargs)]
-    
+
     elif dataset_type == "qa_train":
         assert type(config.train_file) is dict, f"assuming single train media type but get {config.train_file}"
-        
+
         media_type = get_media_type(config.train_file[0])  # assuming single train media type
         if media_type == "audio":
             train_transform = None
         else:
             train_transform = get_train_transform(config, config.train_file)
-            
+
         dataset_cls = get_dataset_cls(dataset_type=dataset_type,
                                       media_type=media_type,
                                       data_cfg=config.train_file)
@@ -303,7 +311,7 @@ def create_dataset(dataset_type, config):
         logger.info(str(train_transform))
 
         return train_dataset
-    
+
     elif dataset_type in ["pt_eval", "ret_eval", "qa_eval"]:
         test_datasets = []
         test_dataset_names = []
@@ -353,7 +361,7 @@ def create_dataset(dataset_type, config):
                     dataset_kwargs.update(audio_only_dataset_kwargs_eval)
                 elif media_type != 'image':
                     raise NotImplementedError(f"media_type={media_type}")
-                
+
             logger.info(f"dataset_type={dataset_type}, test_file={data_cfg}")
             logger.info(dataset_kwargs)
             logger.info('test_transform:')
@@ -361,7 +369,7 @@ def create_dataset(dataset_type, config):
 
             test_datasets.append(test_dataset_cls(**dataset_kwargs))
         return test_datasets, test_dataset_names
-    
+
     elif dataset_type == "mc_test":
         test_transform = get_test_transform(config, config.test_file.mc_test)
         dataset_kwargs = dict(ann_file=[config.test_file.mc_test], transform=test_transform)
@@ -371,9 +379,9 @@ def create_dataset(dataset_type, config):
         logger.info(dataset_kwargs)
         logger.info('test_transform:')
         logger.info(str(test_transform))
-        
+
         return VidTxtRetMCEvalDataset(**dataset_kwargs)
-    
+
     elif dataset_type == "mc_new_test":
         test_transform = get_test_transform(config, config.test_file.mc_test)
         dataset_kwargs = dict(ann_file=[config.test_file.mc_test], transform=test_transform)
@@ -383,9 +391,9 @@ def create_dataset(dataset_type, config):
         logger.info(dataset_kwargs)
         logger.info('test_transform:')
         logger.info(str(test_transform))
-        
+
         return VidTxtRetMCNewEvalDataset(**dataset_kwargs)
-    
+
     else:
         raise NotImplementedError(f"dataset_type={dataset_type}")
 
