@@ -136,12 +136,3 @@ def runwithgpu():
 @app.local_entrypoint()
 def main():
     runwithgpu.remote()
-
-"""
-python -m vllm.entrypoints.openai.api_server \
-    --model Tesslate/Gradience-T1-3B-1400-RL-Merged \
-    --trust-remote-code \
-    --served-model-name Tesslate/Gradience-T1-3B \
-    --enforce-eager \
-    --port 8030
-"""
