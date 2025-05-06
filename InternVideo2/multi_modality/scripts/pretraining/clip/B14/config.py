@@ -13,8 +13,8 @@ stop_key = None
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 4      # Use 4 for demonstration
-batch_size_test = 64 # Use 4 for demonstration
+batch_size = 16      # Use 16 for 5090
+batch_size_test = 16 # Use 16 for 5090
 max_txt_l = 32
 
 inputs = dict(
@@ -85,17 +85,29 @@ criterion = dict(
     ),  # 0: disabled.
 )
 
+# optimizer = dict(
+#     opt="adamW",
+#     lr=1e-5,
+#     opt_betas=[0.9, 0.98],  # default
+#     weight_decay=0.2,
+#     max_grad_norm=0.8,  # requires a positive float, use -1 to disable
+#     # use a different lr for some modules, e.g., larger lr for new modules
+#     different_lr=dict(enable=False, module_names=[], lr=1e-5),
+# )
+
+# Use for 5090
 optimizer = dict(
     opt="adamW",
-    lr=1e-5,
+    lr=2e-4,
     opt_betas=[0.9, 0.98],  # default
-    weight_decay=0.2,
+    weight_decay=0.01,
     max_grad_norm=0.8,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
-    different_lr=dict(enable=False, module_names=[], lr=1e-5),
+    different_lr=dict(enable=False, module_names=[], lr=1e-3),
 )
 
-scheduler = dict(sched="cosine", epochs=2, min_lr_multi=0.01, warmup_epochs=0.0001)
+# Updated for 5090
+scheduler = dict(sched="cosine", epochs=3, min_lr_multi=0.01, warmup_epochs=0.1)
 
 evaluate = False
 deep_fusion = False
