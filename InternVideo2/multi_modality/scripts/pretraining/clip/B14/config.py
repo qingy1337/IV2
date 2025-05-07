@@ -100,16 +100,16 @@ criterion = dict(
 # Use for 5090
 optimizer = dict(
     opt="adamW",
-    lr=2e-4,
+    lr=1e-5,
     opt_betas=[0.9, 0.98],  # default
     weight_decay=0.01,
-    max_grad_norm=0.8,  # requires a positive float, use -1 to disable
+    max_grad_norm=0.7,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
-    different_lr=dict(enable=False, module_names=[], lr=1e-3),
+    different_lr=dict(enable=False, module_names=[], lr=1e-5),
 )
 
 # Updated for 5090
-scheduler = dict(sched="cosine", epochs=3, min_lr_multi=0.01, warmup_epochs=0.01)
+scheduler = dict(sched="cosine", epochs=1, min_lr_multi=0.01, warmup_epochs=0.05)
 
 evaluate = False
 deep_fusion = False
