@@ -105,6 +105,9 @@ def train(
         # Move input data to the designated compute device
         image = image.to(device, non_blocking=True) # Use non_blocking for potential speedup with pinned memory
         idx = idx.to(device, non_blocking=True)     # Index, potentially used for contrastive learning negative sampling
+
+        logger.info(f"Logging data for debugging: image shape: {image.shape}, text: {text}, idx: {idx}")
+
         # Tokenize text data and move it to the device
         text_input = tokenizer(text).to(device)
 
