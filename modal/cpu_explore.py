@@ -20,20 +20,6 @@ image = (
     .pip_install('datasets')
 )
 
-# mergekit_commands = """
-
-# apt-get update -y
-# apt-get install git -y
-# apt-get install curl -y
-# git clone https://github.com/arcee-ai/mergekit.git
-# mv mergekit root/
-# cd root/mergekit && pip install -e .
-# cd root/mergekit && huggingface-cli download rombodawg/Rombos-LLM-V2.5-Qwen-7b --local-dir qwen_chat/
-# cd root/mergekit && huggingface-cli download rombodawg/Rombos-Coder-V2.5-Qwen-7b --local-dir qwen_code/
-# cd root/mergekit && huggingface-cli download Qwen/Qwen2.5-Math-7B-Instruct --local-dir qwen_math/
-
-# """
-
 commands = """
 
 apt-get update -y

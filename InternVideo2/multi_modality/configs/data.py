@@ -1,6 +1,7 @@
 import os as __os  # add "__" if not want to be exported
 from copy import deepcopy as __deepcopy
 
+root_path = "~"
 
 # ============== pretraining datasets=================
 available_corpus = dict(
@@ -21,8 +22,8 @@ available_corpus = dict(
         media_type="video"
     ),
     slim_kinetics=dict(
-        anno_path="/root/k600/kinetics-dataset/k600/train/train/kinetics.json",
-        data_root="/root/k600/kinetics-dataset/k600/train/train",
+        anno_path=f"{root_path}/kinetics-dataset/k600/train/train/kinetics.json",
+        data_root=f"{root_path}/kinetics-dataset/k600/train/train",
         media_type="video"
     )
 )
@@ -30,8 +31,8 @@ available_corpus = dict(
 # ============== for validation =================
 
 available_corpus["slim_kinetics_act_val"] = dict(
-    anno_path="/root/k600/kinetics-dataset/k600/test/kinetics-test.json",
-    data_root="/root/k600/kinetics-dataset/k600/test/",
+    anno_path=f"{root_path}/kinetics-dataset/k600/test/kinetics-test.json",
+    data_root=f"{root_path}/kinetics-dataset/k600/test/",
     media_type="video",
     is_act_rec=True,
 )
