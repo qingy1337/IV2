@@ -10,6 +10,8 @@ num_workers = 2
 
 stop_key = None
 
+root_path = "/home/zli"
+
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
@@ -73,10 +75,10 @@ model = dict(
     freeze_text=True,
     open_text_projection=False,
     open_text_lora=False,
-    vision_ckpt_path="/root/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
+    vision_ckpt_path=f"{root_path}/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
     load_vision_ckpt_from_internvideo2_stage2=False,
-    text_ckpt_path="/root/IV2/models/mobileclip_blt.pt",
-    extra_ckpt_path="/root/IV2/models/clip/B14/pytorch_model.bin"
+    text_ckpt_path=f"{root_path}/IV2/models/mobileclip_blt.pt",
+    extra_ckpt_path=f"{root_path}/IV2/models/clip/B14/pytorch_model.bin"
 )
 
 criterion = dict(
