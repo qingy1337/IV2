@@ -289,39 +289,57 @@ def train(
     # Return the updated global step count
     return global_step
 
+from torch.utils.data._utils.collate import default_collate
+import torch
+
+def clone_collate_fn(batch):
+    # Recursively clone every Tensor in the sample so its storage is fresh
+    def clone_item(x):
+        if isinstance(x, torch.Tensor):
+            return x.clone()
+        elif isinstance(x, (list, tuple)):
+            return type(x)(clone_item(y) for y in x)
+        elif isinstance(x, dict):
+            return {k: clone_item(v) for k, v in x.items()}
+        else:
+            return x
+
+    batch = [clone_item(sample) for sample in batch]
+    return default_collate(batch)
 
 def setup_dataloaders(config, mode="pt"):
-    # train datasets, create a list of data loaders
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
-    media_types = get_media_types(train_datasets)
+    media_types   = get_media_types(train_datasets)
 
-    if config.distributed:
-        batch_size = [config.inputs.batch_size[k] for k in media_types] # batch_size for each GPU
-        samplers = create_stateful_sampler(train_datasets, batch_size)
-    else:
+    if not config.distributed:
         raise NotImplementedError
+
+    # one GPU-batch size per media type
+    batch_size = [config.inputs.batch_size[k] for k in media_types]
+    samplers   = create_stateful_sampler(train_datasets, batch_size)
 
     train_loaders = create_loader(
         train_datasets,
         samplers,
-        batch_size=[config.inputs.batch_size[k] for k in media_types],
-        num_workers=[config.num_workers] * len(media_types),
-        is_trains=[True] * len(media_types),
-        collate_fns=[None] * len(media_types),
+        batch_size   = batch_size,
+        num_workers  = [config.num_workers] * len(media_types),
+        is_trains    = [True] * len(media_types),
+        collate_fns  = [clone_collate_fn] * len(media_types),   # ← here!
     )
 
-    # test datasets, a mapping from dataset name to data loader
+    # eval side stays the same (you probably don’t hit this bug there)
     test_datasets, test_dataset_names = create_dataset(f"{mode}_eval", config)
     test_loaders = create_loader(
         test_datasets,
         [None] * len(test_datasets),
-        batch_size=[config.inputs.batch_size_test[d.media_type] for d in test_datasets],
-        num_workers=[config.num_workers] * len(test_datasets),
-        is_trains=[False] * len(test_datasets),
-        collate_fns=[None] * len(test_datasets),
+        batch_size   = [config.inputs.batch_size_test[d.media_type] for d in test_datasets],
+        num_workers  = [config.num_workers] * len(test_datasets),
+        is_trains    = [False] * len(test_datasets),
+        collate_fns  = [None]   * len(test_datasets),
     )
-    test_name2loaders = {k: v for k, v in zip(test_dataset_names, test_loaders)}
+
+    test_name2loaders = dict(zip(test_dataset_names, test_loaders))
     return train_loaders, test_name2loaders, media_types
 
 
