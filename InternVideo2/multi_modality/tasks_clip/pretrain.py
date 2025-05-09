@@ -85,22 +85,21 @@ def train(
         for t in range(MODEL_MAX_FRAMES, T):
             frame = image[:, :, t, :, :]  # [B, C, H, W]
 
-            with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
-                # Get window embedding using UpdateTransformer
-                window_embedding = model.vision_encoder(frame)
+            # Get window embedding using UpdateTransformer
+            window_embedding = model.vision_encoder(frame)
 
-                # Calculate full forward embedding for comparison
-                with torch.no_grad():
-                    model.vision_encoder.reset_state()
-                    full_forward_embedding = model.vision_encoder(
-                        image[:, :, t-MODEL_MAX_FRAMES+1:t+1, :, :],
-                        force_full_forward=True
-                    ).detach()
+            # Calculate full forward embedding for comparison
+            with torch.no_grad():
+                model.vision_encoder.reset_state()
+                full_forward_embedding = model.vision_encoder(
+                    image[:, :, t-MODEL_MAX_FRAMES+1:t+1, :, :],
+                    force_full_forward=True
+                )
 
-                # Calculate MSE loss for this frame
-                loss_mse = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
-                loss_dict = {"loss_mse": loss_mse}
-                total_loss = loss_mse
+            # Calculate MSE loss for this frame
+            loss_mse = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
+            loss_dict = {"loss_mse": loss_mse}
+            total_loss = loss_mse
 
             # --- Backpropagation and Optimization ---
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
