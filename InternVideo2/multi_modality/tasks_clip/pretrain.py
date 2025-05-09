@@ -23,9 +23,10 @@ from utils.logger import log_dict_to_wandb, setup_wandb
 logger = logging.getLogger(__name__)
 
 import torch
+
 # Assume MetricLogger, SmoothedValue, get_media_types, MetaLoader_rs, logger,
 # is_main_process, log_dict_to_wandb, join are defined elsewhere
-from utils import MetricLogger, SmoothedValue, get_media_types, MetaLoader_rs, logger, is_main_process, log_dict_to_wandb
+# from utils import MetricLogger, SmoothedValue, get_media_types, MetaLoader_rs, logger, is_main_process, log_dict_to_wandb
 from os.path import join
 
 def train(
