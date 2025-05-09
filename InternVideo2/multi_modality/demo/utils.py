@@ -52,13 +52,16 @@ def get_vid_feat(frames, vlm):
     return vlm.get_vid_features(frames)
 
 tensor_cache = {}
-def retrieve_text(frames,
-                  texts,
-                  model,
-                  topk:int=5,
-                  config: dict={},
-                  device=torch.device('cuda'),
-                  log:bool = False):
+def retrieve_text(
+    frames,
+    texts,
+    model,
+    topk:int=5,
+    config: dict={},
+    device=torch.device('cuda'),
+    log:bool = False,
+    return_raw_vision_embeds = False,
+):
     # print(texts)
     vlm = model
     vlm = vlm.to(device)
@@ -66,7 +69,7 @@ def retrieve_text(frames,
     fn = config.get('num_frames', 8)
     size_t = config.get('size_t', 224)
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
-    vid_feat = vlm.get_vid_feat(frames_tensor)
+    vid_feat, raw_vision_embeds = vlm.get_vid_feat(frames_tensor, return_raw_vision_embeds)
 
     calculate = False
     for t in texts:
@@ -88,7 +91,7 @@ def retrieve_text(frames,
 
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
 
-    return ret_texts, probs.float().numpy()[0]
+    return ret_texts, probs.float().numpy()[0], raw_vision_embeds
 
 def retrieve_text_window(
     new_frame,

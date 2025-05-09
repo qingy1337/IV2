@@ -149,17 +149,16 @@ class InternVideo2_CLIP_small(nn.Module):
             loss_vtc=loss_vtc,
         )
 
-    def encode_vision(self, image, test=False, prev_embedding = None):
+    def encode_vision(self, image, test=False, prev_embedding = None, return_raw_vision_embeds = False):
         """encode image / videos as features.
 
         Args:
             image (torch.Tensor): The input images.
             test (bool): Whether testing.
-            force_full_forward (bool): Whether to do a full forward pass, or do the sliding window technique.
 
         Returns: tuple.
             - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
-
+            - (optional) unaligned vision embeds (torch.Tensor): The unaligned vision features.
         """
 
         T = image.shape[1]
@@ -171,15 +170,21 @@ class InternVideo2_CLIP_small(nn.Module):
             image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
             vision_embeds = self.vision_encoder.forward_full(image, use_image=use_image)
 
-        vision_embeds = self.vision_align(vision_embeds)
-        return vision_embeds
+        vision_embeds_aligned = self.vision_align(vision_embeds)
 
-    def get_vid_feat(self, frames: torch.Tensor, prev_embedding = None):
+        if return_raw_vision_embeds:
+            return vision_embeds_aligned, vision_embeds
+
+        return vision_embeds_aligned, None
+
+    def get_vid_feat(self, frames: torch.Tensor, prev_embedding = None, return_raw_vision_embeds = False):
         with torch.no_grad():
-            vfeat = self.encode_vision(frames, test=True, prev_embedding = prev_embedding)
+            vfeat, raw_vfeat = self.encode_vision(frames, test=True, prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
+
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
-        return vfeat
+
+        return vfeat, raw_vfeat
 
     def encode_text(self, text):
         """encode text.

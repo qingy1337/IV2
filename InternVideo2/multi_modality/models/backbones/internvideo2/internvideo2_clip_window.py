@@ -216,7 +216,7 @@ class WindowInternVideo(InternVideo2):
                           have requires_grad=True if the base model parameters do.
         """
         if not (len(x.shape) == 5):
-             raise ValueError(f"forward_full expects input shape [B, C, T, H, W], but got {x.shape}")
+            raise ValueError(f"forward_full expects input shape [B, C, T, H, W], but got {x.shape}")
 
         embedding = super().forward(x, use_image=use_image)
         return embedding
@@ -231,7 +231,7 @@ class WindowInternVideo(InternVideo2):
             torch.Tensor: The updated POOLED embedding [B, C_embed_dim].
         """
         if not (len(frame.shape) == 4):
-                raise ValueError(f"forward_update expects frame shape [B, C, H, W], but got {frame.shape}")
+            raise ValueError(f"forward_update expects frame shape [B, C, H, W], but got {frame.shape}")
 
         # --- MODIFIED CHECK ---
         # Original check that caused the error:
