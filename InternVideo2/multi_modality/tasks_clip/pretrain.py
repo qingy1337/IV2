@@ -149,6 +149,8 @@ def train(
                 # | frame now has shape [B, C, H, W]  |
                 # `-----------------------------------'
 
+                logger.info(f"On frame [{t-MODEL_MAX_FRAMES}:{t}], the previous embedding's shape is {prev_embedding.shape}")
+
                 window_embedding = model.vision_encoder.forward_update(frame, prev_embedding = prev_embedding) # New embedding using the UpdateTransformer
 
                 with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
