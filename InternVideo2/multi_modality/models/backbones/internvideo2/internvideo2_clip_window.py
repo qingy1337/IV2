@@ -28,6 +28,8 @@ class WindowInternVideo_old(InternVideo2):
             num_layers=8
         )
 
+        self.grid_size = self.patch_embed.grid_size
+
         # Initialize state
         self.reset_state()
 
