@@ -15,8 +15,8 @@ root_path = "/home/zli"
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 8      # Use 8 for 5090
-batch_size_test = 8 # Use 8 for 5090
+batch_size = 16      # Use 16 for 5090
+batch_size_test = 16 # Use 16 for 5090
 max_txt_l = 32
 
 inputs = dict(

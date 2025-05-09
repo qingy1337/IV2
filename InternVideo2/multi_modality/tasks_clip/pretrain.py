@@ -154,15 +154,14 @@ def train(
 
                 window_embedding = model.vision_encoder(frame) # New embedding using the UpdateTransformer
 
-                # with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
                 model.vision_encoder.reset_state()
-                full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True).detach()
+
+                with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
+                    full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True)
 
                 temp_loss += torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 
-                total_mse.append(temp_loss.clone())
-
-                temp_loss = torch.tensor(0.0, device=image.device)  # Keeps gradient history
+                total_mse.append(temp_loss)
 
             loss_dicts = [dict(
                 loss_mse = x
