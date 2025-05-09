@@ -64,8 +64,8 @@ def train(
     # Initialize MetricLogger to track and average metrics during training
     metric_logger = MetricLogger(delimiter="  ")
     # Add meters to track learning rate and the model's temperature parameter (often used in contrastive losses)
-    metric_logger.add_meter("lr", SmoothedValue(window=100, fmt="{value:.6f}"))
-    metric_logger.add_meter("temperature", SmoothedValue(window=100, fmt="{value:.4f}"))
+    metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
+    metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     # Determine the names of the active loss components based on non-zero weights in the config
     active_loss_names = ["loss_mse"]
 
@@ -76,7 +76,7 @@ def train(
     for loss_name in active_loss_names:
         for media_type_key in media_types:
             metric_logger.add_meter(
-                f"{media_type_key}-{loss_name}", SmoothedValue(window=100, fmt="{value:.4f}")
+                f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}")
             )
 
     # Define the header for logging messages for this epoch
