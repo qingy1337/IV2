@@ -35,7 +35,8 @@ def train(
     scaler,               # Gradient scaler for automatic mixed precision (AMP)
     config,               # Configuration object containing hyperparameters and settings
     data_type,            # The data type for AMP (e.g., torch.float16, torch.bfloat16)
-    skip_num=0            # Number of batches to skip at the beginning of the epoch (for resuming)
+    skip_num=0,            # Number of batches to skip at the beginning of the epoch (for resuming)
+    log_backprop=False,   # Debugging logs for backprop
 ):
     """
     Performs one epoch of training.
@@ -145,11 +146,8 @@ def train(
             for t in range(MODEL_MAX_FRAMES, T):
                 frame = image[:, :, t, :, :]
 
-                # ,-----------------------------------.
-                # | frame now has shape [B, C, H, W]  |
-                # `-----------------------------------'
-
-                logger.info(f"On frame [{t-MODEL_MAX_FRAMES}:{t}], the previous embedding's shape is {prev_embedding.shape}")
+                if log_backprop:
+                    logger.info(f"On frame [{t-MODEL_MAX_FRAMES}:{t}], the previous embedding's shape is {prev_embedding.shape}")
 
                 window_embedding = model.vision_encoder.forward_update(frame, prev_embedding = prev_embedding) # New embedding using the UpdateTransformer
 
@@ -166,17 +164,18 @@ def train(
                 # Note: Loss weights are typically applied within the model's forward or criterion
                 total_loss = sum(loss_dict.values())
 
-        # for i in range(len(total_losses)):
-
-                logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
+                if log_backprop:
+                    logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
                 # --- Backpropagation and Optimization ---
                 # Check if using DeepSpeed for optimized distributed training
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
                     model.backward(total_loss) # Use DeepSpeed's backward method
                     model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
-                    logger.info("BACKWARD SUCCESSFUL!")
-                    logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
+
+                    if log_backprop:
+                        logger.info("BACKWARD SUCCESSFUL!")
+                        logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
                 else:
                     # Standard PyTorch / AMP training step
                     # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
@@ -204,7 +203,8 @@ def train(
                         scaler.update()
                         scheduler.step()      # Update learning rate
 
-                logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
+                if log_backprop:
+                    logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
                 # --- Logging Metrics ---
                 # Update metric logger with the values of individual loss components for the current batch
                 # loss_dict = {"loss_mse": loss_for_logging}
@@ -229,7 +229,8 @@ def train(
 
                 # Log Step Info
                 logger.info(f"Training -- Step [{global_step:,}]")
-                logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
+                if log_backprop:
+                    logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
 
                 # --- Debugging Hooks ---
                 # Optional early termination conditions for debugging
@@ -243,7 +244,8 @@ def train(
                 # --- Iteration-based Checkpointing ---
                 # Save a checkpoint at specified step intervals if `save_iter` > 0
                 if config.get('save_iter', 0) and global_step % config.save_iter == 0:
-                    logger.info(f"5 Total Loss requires grad: {total_loss.requires_grad}")
+                    if log_backprop:
+                        logger.info(f"5 Total Loss requires grad: {total_loss.requires_grad}")
                     if hasattr(config, "deepspeed") and config.deepspeed.enable:
                         # DeepSpeed handles checkpoint saving logic
                         checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
@@ -251,7 +253,8 @@ def train(
                         model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
                     elif is_main_process(): # Only the main process saves checkpoints in standard DDP
                         # Get the model's state dictionary
-                        logger.info(f"6 Total Loss requires grad: {total_loss.requires_grad}")
+                        if log_backprop:
+                            logger.info(f"6 Total Loss requires grad: {total_loss.requires_grad}")
                         state_dict = model_without_ddp.state_dict()
                         # Identify parameters that are frozen (do not require gradients)
                         param_requires_grad_dict = {
