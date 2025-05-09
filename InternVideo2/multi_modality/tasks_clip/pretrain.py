@@ -167,7 +167,7 @@ def train(
             # Note: Loss weights are typically applied within the model's forward or criterion
             total_losses = [sum(x.values()) for x in loss_dicts]
 
-        for loss_dict, total_loss in zip(loss_dicts, total_losses):
+        for total_loss in total_losses:
             # --- Backpropagation and Optimization ---
             # Check if using DeepSpeed for optimized distributed training
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
@@ -203,6 +203,8 @@ def train(
 
             # --- Logging Metrics ---
             # Update metric logger with the values of individual loss components for the current batch
+
+            loss_dict = {"loss_mse": total_loss}
             for loss_name in active_loss_names:
                 loss_value = loss_dict[loss_name]
                 # Ensure value is a standard Python number for logging
