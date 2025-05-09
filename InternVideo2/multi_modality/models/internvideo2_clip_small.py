@@ -47,7 +47,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # freeze model
         if self.config.model.freeze_vision:
-            for name, p in self.vision_encoder.named_parameters():
+            for name, p in self.vision_encoder.super().named_parameters():
                 if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
                     logger.info(f"Unfreeze {name}")
                 else:
