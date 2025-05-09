@@ -364,24 +364,36 @@ class WindowInternVideo(InternVideo2):
         # This logic should mirror how use_image=True is handled for pos_embed in _extract_pre_projector_features
         # if we consider a single frame as an "image".
 
+        # Add positional embedding for the new frame tokens.
         num_spatial_patches_expected = self.patch_embed.grid_size[1] * self.patch_embed.grid_size[2]
-        if L_patch_nft != num_spatial_patches_expected:
+        if L_patch_nft != num_spatial_patches_expected: # L_patch_nft is from new_frame_patch_tokens.shape
             raise ValueError(f"Num spatial patches from new frame ({L_patch_nft}) mismatch expected ({num_spatial_patches_expected})")
 
         if self.sep_pos_embed:
-            frame_pos_embed = self.pos_embed_spatial # [1, num_spatial_patches, C_emb]
+            frame_pos_embed = self.pos_embed_spatial # [1, num_spatial_patches_expected, self.embed_dim]
         else: # Combined 3D pos_embed
-            # Take the pos_embed corresponding to the first time slice of spatial patches
-            # Or, use the same logic as use_image=True for non-sep: temporally averaged spatial pos_embed
-            frame_pos_embed = self.pos_embed[:, 1 : 1 + num_spatial_patches_expected, :].view(
-                1, self.grid_size[0], num_spatial_patches_expected, self.embed_dim
-            ).mean(dim=1) # [1, num_spatial_patches, C_emb]
+            # Get all patch embeddings (excluding CLS token's pos_embed)
+            all_patch_pos_embed = self.pos_embed[:, 1:, :]
+            # Expected shape of all_patch_pos_embed: [1, T_grid * H_grid * W_grid, self.embed_dim]
+            # T_grid = self.grid_size[0]
+            # H_grid * W_grid = num_spatial_patches_expected
+
+            # Reshape to [1, T_grid, H_grid*W_grid, self.embed_dim] to allow temporal averaging
+            reshaped_pos_embed = all_patch_pos_embed.view(
+                1,                                      # Batch dimension
+                self.grid_size[0],                      # T_grid (temporal dimension from original model config)
+                num_spatial_patches_expected,           # Spatial patches (H_grid * W_grid)
+                self.embed_dim                          # Embedding dimension
+            )
+
+            # Average over the temporal dimension
+            frame_pos_embed = reshaped_pos_embed.mean(dim=1) # Shape: [1, num_spatial_patches_expected, self.embed_dim]
 
         new_frame_patch_tokens = new_frame_patch_tokens + frame_pos_embed.to(new_frame_patch_tokens.device, non_blocking=True)
 
         updated_embedding = self.update_transformer(
-            prev_embedding,       # [B, self.embed_dim] (pooled CLS-like)
-            new_frame_patch_tokens  # [B, L_new, self.embed_dim] (sequence of new frame's spatial patches)
+            prev_embedding,
+            new_frame_patch_tokens
         )
 
         if not (len(updated_embedding.shape) == 2 and updated_embedding.shape[0] == frame.shape[0] and updated_embedding.shape[1] == self.embed_dim):
