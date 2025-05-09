@@ -95,7 +95,7 @@ def train(
                     full_forward_embedding = model.vision_encoder(
                         image[:, :, t-MODEL_MAX_FRAMES+1:t+1, :, :],
                         force_full_forward=True
-                    )
+                    ).detach()
 
                 # Calculate MSE loss for this frame
                 loss_mse = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
