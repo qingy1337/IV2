@@ -133,6 +133,8 @@ def retrieve_text_window(
         if log: print("Using Cached")
         text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
 
+    print(f"Video feature is of shape {vid_feat}")
+    print(f"Text feature is of shape {text_feats_tensor}")
     probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
 
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
