@@ -160,13 +160,13 @@ def train(
 
                 total_mse.append(loss)
 
-            loss_dicts = [dict(
-                loss_mse = x
-            ) for x in total_mse] # list of dicts
+        loss_dicts = [dict(
+            loss_mse = x
+        ) for x in total_mse] # list of dicts
 
-            # Calculate the total loss by summing the individual weighted loss components
-            # Note: Loss weights are typically applied within the model's forward or criterion
-            total_losses = [sum(x.values()) for x in loss_dicts]
+        # Calculate the total loss by summing the individual weighted loss components
+        # Note: Loss weights are typically applied within the model's forward or criterion
+        total_losses = [sum(x.values()) for x in loss_dicts]
 
         for total_loss in total_losses:
             copied_loss = total_loss.clone()
