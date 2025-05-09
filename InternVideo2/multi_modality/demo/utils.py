@@ -115,7 +115,7 @@ def retrieve_text_window(
 
     print(f"Frames tensor has shape {frames_tensor.shape}")
 
-    vid_feat = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
+    vid_feat, raw_vision_embeds = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
 
     calculate = False
     for t in texts:
@@ -139,7 +139,7 @@ def retrieve_text_window(
 
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
 
-    return ret_texts, probs.float().numpy()[0]
+    return ret_texts, probs.float().numpy()[0], raw_vision_embeds
 
 def setup_internvideo2(config: dict):
     if "bert" in config.model.text_encoder.name:
