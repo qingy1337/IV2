@@ -15,7 +15,7 @@ from .internvideo2_clip_vision import *
 def log(text):
     print('---- WindowInternVideo2.forward() ----\n' + text)
 
-class WindowInternVideo2(InternVideo2):
+class WindowInternVideo_old(InternVideo2):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -174,6 +174,117 @@ class WindowInternVideo2(InternVideo2):
                 self.frame_count += 1
 
         return self.current_embedding
+
+class WindowInternVideo(InternVideo2):
+    def __init__(self, *args, num_update_layers=8, **kwargs):
+        """
+        Initializes the WindowInternVideo model.
+
+        Args:
+            *args: Arguments passed to the base InternVideo2 class.
+            num_update_layers (int): Number of layers in the UpdateTransformer. Defaults to 8.
+            **kwargs: Keyword arguments passed to the base InternVideo2 class.
+        """
+        super().__init__(*args, **kwargs)
+
+        # Assuming base class sets self.embed_dim, self.num_heads, etc.
+        # Pass required parameters from base class attributes
+        self.update_transformer = UpdateTransformer(
+            embed_dim=self.embed_dim,
+            num_heads=getattr(self, 'num_heads', 12), # Get from base or use default
+            mlp_ratio=getattr(self, 'mlp_ratio', 4.0),
+            qkv_bias=getattr(self, 'qkv_bias', True),
+            norm_layer=getattr(self, 'norm_layer_for_blocks', nn.LayerNorm), # Get from base or use default
+            num_layers=num_update_layers
+        )
+
+        # The internal state (current_embedding, frame_buffer etc.) is removed
+        # and must be managed externally.
+
+
+    def forward_full(self, x, use_image = False):
+        """
+        Computes the embedding for a window of frames using the base model's
+        full forward pass.
+
+        Args:
+            x: Input frames [B, C, T, H, W].
+            use_image (bool): Passed to the base InternVideo2.forward() function.
+
+        Returns:
+            torch.Tensor: The computed embedding [B, L, C]. This tensor will
+                          have requires_grad=True if the base model parameters do.
+        """
+        if not (len(x.shape) == 5):
+             raise ValueError(f"forward_full expects input shape [B, C, T, H, W], but got {x.shape}")
+
+        embedding = super().forward(x, use_image=use_image)
+        return embedding
+
+    def forward_update(self, frame, prev_embedding):
+        """
+        Updates the embedding with a single new frame using the UpdateTransformer.
+
+        Args:
+            frame: Input frame [B, C, H, W].
+            prev_embedding: The embedding from the previous step [B, L, C].
+                            Can be None for the very first update step,
+                            in which case it might be initialized or handled
+                            specifically by the UpdateTransformer.
+
+        Returns:
+            torch.Tensor: The updated embedding [B, L, C]. This tensor will
+                          have requires_grad=True if frame, prev_embedding,
+                          or UpdateTransformer parameters require gradients.
+        """
+        if not (len(frame.shape) == 4):
+             raise ValueError(f"forward_update expects frame shape [B, C, H, W], but got {frame.shape}")
+        if prev_embedding is not None and not (len(prev_embedding.shape) == 3):
+             raise ValueError(f"forward_update expects prev_embedding shape [B, L, C] or None, but got {prev_embedding.shape}")
+
+        # Ensure prev_embedding is on the correct device if not None
+        if prev_embedding is not None:
+             prev_embedding = prev_embedding.to(frame.device)
+        else:
+             # Handle case where prev_embedding is None (e.g., first frame after a full forward)
+             # The UpdateTransformer might need to handle this, or you ensure
+             # prev_embedding is *always* initialized by forward_full or a dummy.
+             # A common approach is to initialize prev_embedding with zeros or a learned parameter
+             # if there's no preceding full forward pass.
+             # Let's assume for this design that prev_embedding is initialized externally
+             # via a call to forward_full or a dedicated initial state logic.
+             # For robustness, we might add a learned initial state:
+             # if not hasattr(self, 'initial_state'):
+             #    self.initial_state = nn.Parameter(torch.randn(1, self.initial_seq_len, self.embed_dim))
+             # prev_embedding = self.initial_state.repeat(frame.shape[0], 1, 1) # Repeat for batch size
+             # OR raise an error if prev_embedding is expected
+             raise ValueError("prev_embedding cannot be None after the initial step. Initialize with forward_full.")
+
+
+        # Prepare the single frame for patch embedding
+        # patch_embed likely expects [B, C, T, H, W], so add a T=1 dimension
+        frame_5d = frame.unsqueeze(2) # Shape [B, C, 1, H, W]
+
+        # Get patch tokens for the new frame using the base model's patch_embed
+        # Assuming patch_embed outputs [B, 1, L_patch, C] from [B, C, 1, H, W]
+        # or potentially needs reshaping like in the dummy base class
+        new_frame_tokens = self.patch_embed(frame_5d) # Shape might vary based on patch_embed
+
+        # Assuming patch_embed output needs reshaping to [B, L_new, C]
+        B, *remaining_dims = new_frame_tokens.shape
+        new_frame_tokens = new_frame_tokens.view(B, -1, self.embed_dim) # Reshape to [B, L_new, C]
+        L_new = new_frame_tokens.shape[1]
+
+
+        updated_embedding = self.update_transformer(
+            prev_embedding,
+            new_frame_tokens
+        )
+
+        return updated_embedding
+
+    # Remove reset_state, pop_last_frame, original forward, forward_inference
+    # These methods are replaced by forward_full and forward_update
 
 class UpdateTransformer(nn.Module):
     def __init__(

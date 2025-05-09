@@ -58,8 +58,7 @@ def retrieve_text(frames,
                   topk:int=5,
                   config: dict={},
                   device=torch.device('cuda'),
-                  log:bool = False,
-                  force_full_forward:bool = True):
+                  log:bool = False):
     # print(texts)
     vlm = model
     vlm = vlm.to(device)
@@ -67,7 +66,7 @@ def retrieve_text(frames,
     fn = config.get('num_frames', 8)
     size_t = config.get('size_t', 224)
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
-    vid_feat = vlm.get_vid_feat(frames_tensor, force_full_forward = force_full_forward)
+    vid_feat = vlm.get_vid_feat(frames_tensor)
 
     calculate = False
     for t in texts:
@@ -86,14 +85,55 @@ def retrieve_text(frames,
         text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
 
     probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
-    # print("-" * 30)
-    # print(probs)
-    # print(idxs)
-    # print("-" * 30)
+
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
-    # print(texts)
+
     return ret_texts, probs.float().numpy()[0]
 
+def retrieve_text_window(
+    new_frame,
+    texts,
+    model,
+    prev_embedding,
+    topk:int=5,
+    config: dict={},
+    device=torch.device('cuda'),
+    log:bool = False,
+):
+
+    vlm = model
+    vlm = vlm.to(device)
+
+    size_t = config.get('size_t', 224)
+
+    # new frame is a list with one frame.
+    frames_tensor = frames2tensor(new_frame, fnum=1, target_size=(size_t, size_t), device=device)
+
+    print(f"Frames tensor has shape {frames_tensor.shape}")
+
+    vid_feat = vlm.get_vid_feat(torch.squeeze(frames_tensor, 2), prev_embedding = prev_embedding)
+
+    calculate = False
+    for t in texts:
+        if t not in tensor_cache:
+            calculate = True
+            break
+    if calculate:
+        text_feat_d = {}
+        text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
+        text_feats = [text_feat_d[t] for t in texts]
+        text_feats_tensor = torch.cat(text_feats, 0)
+        for j in range(len(texts)):
+            tensor_cache[texts[j]] = text_feats_tensor[j]
+    else:
+        if log: print("Using Cached")
+        text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
+
+    probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
+
+    ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
+
+    return ret_texts, probs.float().numpy()[0]
 
 def setup_internvideo2(config: dict):
     if "bert" in config.model.text_encoder.name:

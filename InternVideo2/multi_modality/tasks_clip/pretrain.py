@@ -138,11 +138,14 @@ def train(
             frames = image[:, :, :num_frames, :, :]
 
             # Calculate full forward pass embedding from the vision encoder.
-            initial_embedding = model.vision_encoder(frames, force_full_forward = True)
+            with torch.no_grad():
+                initial_embedding = model.vision_encoder.forward_full(frames)
 
             total_mse = []
 
             temp_loss = torch.tensor(0.0, device=image.device)  # Keeps gradient history
+
+            prev_embedding = initial_embedding.clone()  # Keep track of the previous full embedding.
 
             # Skip the first MODEL_MAX_FRAMES frames
             for t in range(MODEL_MAX_FRAMES, T):
@@ -152,12 +155,12 @@ def train(
                 # | frame now has shape [B, C, H, W]  |
                 # `-----------------------------------'
 
-                window_embedding = model.vision_encoder(frame) # New embedding using the UpdateTransformer
-
-                model.vision_encoder.reset_state()
+                window_embedding = model.vision_encoder(frame, prev_embedding = prev_embedding) # New embedding using the UpdateTransformer
 
                 with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
-                    full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True)
+                    full_forward_embedding = model.vision_encoder.forward_full(frames[:, :, -MODEL_MAX_FRAMES:, :, :])
+
+                prev_embedding = full_forward_embedding.clone()
 
                 temp_loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 

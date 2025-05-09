@@ -9,7 +9,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, WindowInternVideo2
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, WindowInternVideo
 from .criterions import VTC_VTM_Loss
 
 logger = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ class InternVideo2_CLIP_small(nn.Module):
             loss_vtc=loss_vtc,
         )
 
-    def encode_vision(self, image, test=False, force_full_forward = True):
+    def encode_vision(self, image, test=False, prev_embedding = None):
         """encode image / videos as features.
 
         Args:
@@ -135,21 +135,22 @@ class InternVideo2_CLIP_small(nn.Module):
             - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
 
         """
+
         T = image.shape[1]
         use_image = True if T == 1 else False
-        image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
 
-        vision_embeds = self.vision_encoder(image, use_image=use_image, force_full_forward=force_full_forward)
-
-        # print(f"---- InternVideo2_CLIP_Small.encode_vision(force_full_forward={force_full_forward}) ----")
-        # print(f"The vision_embeds are in the shape {vision_embeds.shape}")
+        if not prev_embedding is None:
+            vision_embeds = self.vision_encoder(image, use_image = use_image, prev_embedding = prev_embedding)
+        else:
+            image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
+            vision_embeds = self.vision_encoder.forward_full(image, use_image=use_image)
 
         vision_embeds = self.vision_align(vision_embeds)
         return vision_embeds
 
-    def get_vid_feat(self, frames: torch.Tensor, force_full_forward: bool = True):
+    def get_vid_feat(self, frames: torch.Tensor, prev_embedding = None):
         with torch.no_grad():
-            vfeat = self.encode_vision(frames, test=True, force_full_forward=force_full_forward)
+            vfeat = self.encode_vision(frames, test=True, prev_embedding = prev_embedding)
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
         return vfeat
@@ -192,7 +193,7 @@ class InternVideo2_CLIP_small(nn.Module):
         Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
 
         """
-        vision_encoder = WindowInternVideo2( # Originally just InternVideo2. WindowInternVideo2 is a wrapper around the InternVideo2 so it should work just fine, except that you have to do force_full_forward = True in the forward function
+        vision_encoder = WindowInternVideo( # Originally just InternVideo2. WindowInternVideo is a wrapper around the InternVideo2 so it should work just fine, except that you have to do forward_full()
             in_chans=self.config.model.vision_encoder.in_chans,
             patch_size=self.config.model.vision_encoder.patch_size,
             img_size=self.config.model.vision_encoder.img_size,
