@@ -203,8 +203,6 @@ def train(
 
             # --- Logging Metrics ---
             # Update metric logger with the values of individual loss components for the current batch
-
-            loss_dict = {"loss_mse": total_loss}
             for loss_name in active_loss_names:
                 loss_value = loss_dict[loss_name]
                 # Ensure value is a standard Python number for logging
