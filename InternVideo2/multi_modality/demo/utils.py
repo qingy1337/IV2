@@ -69,7 +69,7 @@ def retrieve_text(
     fn = config.get('num_frames', 8)
     size_t = config.get('size_t', 224)
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
-    vid_feat, raw_vision_embeds = vlm.get_vid_feat(frames_tensor, return_raw_vision_embeds)
+    vid_feat, raw_vision_embeds = vlm.get_vid_feat(frames_tensor, return_raw_vision_embeds=return_raw_vision_embeds)
 
     calculate = False
     for t in texts:
