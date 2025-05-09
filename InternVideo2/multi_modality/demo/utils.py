@@ -111,7 +111,7 @@ def retrieve_text_window(
     size_t = config.get('size_t', 224)
 
     # new frame is a list with one frame.
-    frames_tensor = frames2tensor(new_frame, fnum=1, target_size=(size_t, size_t), device=device)
+    frames_tensor = frames2tensor([new_frame], fnum=1, target_size=(size_t, size_t), device=device)
 
     print(f"Frames tensor has shape {frames_tensor.shape}")
 
