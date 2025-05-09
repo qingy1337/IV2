@@ -159,11 +159,9 @@ def train(
                 with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
                     full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True)
 
-                temp_loss += torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
+                temp_loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 
-                total_mse.append(temp_loss)
-
-                loss_dict = dict(total_mse = total_mse)
+                loss_dict = dict(total_mse = temp_loss)
 
                 # Calculate the total loss by summing the individual weighted loss components
                 # Note: Loss weights are typically applied within the model's forward or criterion
