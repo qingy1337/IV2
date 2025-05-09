@@ -163,133 +163,129 @@ def train(
 
                 total_mse.append(temp_loss)
 
-            loss_dicts = [dict(
-                loss_mse = x
-            ) for x in total_mse] # list of dicts
+                loss_dict = dict(total_mse = total_mse)
 
-            # Calculate the total loss by summing the individual weighted loss components
-            # Note: Loss weights are typically applied within the model's forward or criterion
-            total_losses = [sum(x.values()) for x in loss_dicts]
+                # Calculate the total loss by summing the individual weighted loss components
+                # Note: Loss weights are typically applied within the model's forward or criterion
+                total_loss = sum(loss_dict.values())
 
-        for i in range(len(total_losses)):
-            total_loss = total_losses[i]
-            loss_dict = loss_dicts[i]
+        # for i in range(len(total_losses)):
 
-            logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
-            # --- Backpropagation and Optimization ---
-            # Check if using DeepSpeed for optimized distributed training
-            if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
-                model.backward(total_loss) # Use DeepSpeed's backward method
-                model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
-                logger.info("BACKWARD SUCCESSFUL!")
-                logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
-            else:
-                # Standard PyTorch / AMP training step
-                # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
-                if not config.use_half_precision or config.get('use_bf16', True):
-                    # --- Standard Precision or BFloat16 ---
-                    optimizer.zero_grad() # Reset gradients from previous step
-                    total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
-                    # Apply gradient clipping if specified in the config to prevent exploding gradients
-                    if config.optimizer.max_grad_norm > 0:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                    optimizer.step()      # Update model parameters based on computed gradients
-                    scheduler.step()      # Update learning rate according to the schedule
-                else:
-                    # --- Float16 Mixed Precision with GradScaler ---
-                    optimizer.zero_grad() # Reset gradients
-                    # Scale the loss before backpropagation to prevent gradient underflow with float16
-                    scaler.scale(total_loss).backward()
-                    # Apply gradient clipping if specified (must unscale gradients first)
-                    if config.optimizer.max_grad_norm > 0:
-                        scaler.unscale_(optimizer) # Unscale gradients before clipping
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                    # scaler.step() first unscales gradients, checks for inf/NaNs, then calls optimizer.step()
-                    scaler.step(optimizer)
-                    # scaler.update() adjusts the scaling factor for the next iteration
-                    scaler.update()
-                    scheduler.step()      # Update learning rate
-
-            logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
-            # --- Logging Metrics ---
-            # Update metric logger with the values of individual loss components for the current batch
-            # loss_dict = {"loss_mse": loss_for_logging}
-            for loss_name in active_loss_names:
-                loss_value = loss_dict[loss_name]
-                # Ensure value is a standard Python number for logging
-                loss_value = loss_value if isinstance(loss_value, float) else loss_value.item()
-                metric_logger.update(**{f"{media_type}-{loss_name}": loss_value}) # Log loss per media type
-            # Update metric logger with the current learning rate and model temperature
-            metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-            metric_logger.update(temperature=model_without_ddp.temp.item())
-
-            # Log aggregated metrics to Weights & Biases (wandb) periodically if enabled
-            if is_main_process() and config.wandb.enable and global_step % log_freq == 0:
-                # Get the globally averaged metrics from the logger (synchronized across processes if distributed)
-                averaged_logs = metric_logger.get_global_avg_dict()
-                # Send the logs to wandb, associated with the current global step
-                log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
-
-            # Increment the global step counter
-            global_step += 1
-
-            # Log Step Info
-            logger.info(f"Training -- Step [{global_step:,}]")
-            logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
-
-            # --- Debugging Hooks ---
-            # Optional early termination conditions for debugging
-            if config.debug and global_step % 20 == 0:
-                logger.info("Debug mode: breaking training loop early (step condition).")
-                break
-            if config.debug and global_step % (2 * log_freq + 3) == 0: # Another arbitrary break condition
-                logger.info("Debug mode: breaking training loop early (log freq condition).")
-                break
-
-            # --- Iteration-based Checkpointing ---
-            # Save a checkpoint at specified step intervals if `save_iter` > 0
-            if config.get('save_iter', 0) and global_step % config.save_iter == 0:
-                logger.info(f"5 Total Loss requires grad: {total_loss.requires_grad}")
+                logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
+                # --- Backpropagation and Optimization ---
+                # Check if using DeepSpeed for optimized distributed training
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                    # DeepSpeed handles checkpoint saving logic
-                    checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
-                    # Exclude frozen parameters to save space if needed
-                    model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
-                elif is_main_process(): # Only the main process saves checkpoints in standard DDP
-                    # Get the model's state dictionary
-                    logger.info(f"6 Total Loss requires grad: {total_loss.requires_grad}")
-                    state_dict = model_without_ddp.state_dict()
-                    # Identify parameters that are frozen (do not require gradients)
-                    param_requires_grad_dict = {
-                        name: param.requires_grad for (name, param) in model_without_ddp.named_parameters()
-                    }
-                    # Create a list of keys corresponding to frozen parameters
-                    keys_to_remove = []
-                    for param_name in state_dict.keys():
-                        if param_name in param_requires_grad_dict and not param_requires_grad_dict[param_name]:
-                            keys_to_remove.append(param_name)
-                    # Remove frozen parameters from the state dictionary before saving
-                    if keys_to_remove:
-                        logger.info(f"Removing {len(keys_to_remove)} frozen parameters from checkpoint: {keys_to_remove}")
-                        for param_name in keys_to_remove:
-                            del state_dict[param_name]
+                    # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
+                    model.backward(total_loss) # Use DeepSpeed's backward method
+                    model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
+                    logger.info("BACKWARD SUCCESSFUL!")
+                    logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
+                else:
+                    # Standard PyTorch / AMP training step
+                    # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
+                    if not config.use_half_precision or config.get('use_bf16', True):
+                        # --- Standard Precision or BFloat16 ---
+                        optimizer.zero_grad() # Reset gradients from previous step
+                        total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
+                        # Apply gradient clipping if specified in the config to prevent exploding gradients
+                        if config.optimizer.max_grad_norm > 0:
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                        optimizer.step()      # Update model parameters based on computed gradients
+                        scheduler.step()      # Update learning rate according to the schedule
+                    else:
+                        # --- Float16 Mixed Precision with GradScaler ---
+                        optimizer.zero_grad() # Reset gradients
+                        # Scale the loss before backpropagation to prevent gradient underflow with float16
+                        scaler.scale(total_loss).backward()
+                        # Apply gradient clipping if specified (must unscale gradients first)
+                        if config.optimizer.max_grad_norm > 0:
+                            scaler.unscale_(optimizer) # Unscale gradients before clipping
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                        # scaler.step() first unscales gradients, checks for inf/NaNs, then calls optimizer.step()
+                        scaler.step(optimizer)
+                        # scaler.update() adjusts the scaling factor for the next iteration
+                        scaler.update()
+                        scheduler.step()      # Update learning rate
 
-                    # Assemble the checkpoint object including model, optimizer, scheduler states, etc.
-                    save_obj = {
-                        "model": state_dict,
-                        "optimizer": optimizer.state_dict(),
-                        "scheduler": scheduler.state_dict(),
-                        "scaler": scaler.state_dict(), # Important for resuming AMP training
-                        "config": config,             # Save config for reproducibility
-                        "epoch": epoch,               # Current epoch
-                        "global_step": global_step,   # Current step
-                    }
-                    # Define the checkpoint filename
-                    checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:02d}.pth")
-                    # Save the checkpoint object to disk
-                    torch.save(save_obj, checkpoint_filename)
-                    logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
+                logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
+                # --- Logging Metrics ---
+                # Update metric logger with the values of individual loss components for the current batch
+                # loss_dict = {"loss_mse": loss_for_logging}
+                for loss_name in active_loss_names:
+                    loss_value = loss_dict[loss_name]
+                    # Ensure value is a standard Python number for logging
+                    loss_value = loss_value if isinstance(loss_value, float) else loss_value.item()
+                    metric_logger.update(**{f"{media_type}-{loss_name}": loss_value}) # Log loss per media type
+                # Update metric logger with the current learning rate and model temperature
+                metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+                metric_logger.update(temperature=model_without_ddp.temp.item())
+
+                # Log aggregated metrics to Weights & Biases (wandb) periodically if enabled
+                if is_main_process() and config.wandb.enable and global_step % log_freq == 0:
+                    # Get the globally averaged metrics from the logger (synchronized across processes if distributed)
+                    averaged_logs = metric_logger.get_global_avg_dict()
+                    # Send the logs to wandb, associated with the current global step
+                    log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
+
+                # Increment the global step counter
+                global_step += 1
+
+                # Log Step Info
+                logger.info(f"Training -- Step [{global_step:,}]")
+                logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
+
+                # --- Debugging Hooks ---
+                # Optional early termination conditions for debugging
+                if config.debug and global_step % 20 == 0:
+                    logger.info("Debug mode: breaking training loop early (step condition).")
+                    break
+                if config.debug and global_step % (2 * log_freq + 3) == 0: # Another arbitrary break condition
+                    logger.info("Debug mode: breaking training loop early (log freq condition).")
+                    break
+
+                # --- Iteration-based Checkpointing ---
+                # Save a checkpoint at specified step intervals if `save_iter` > 0
+                if config.get('save_iter', 0) and global_step % config.save_iter == 0:
+                    logger.info(f"5 Total Loss requires grad: {total_loss.requires_grad}")
+                    if hasattr(config, "deepspeed") and config.deepspeed.enable:
+                        # DeepSpeed handles checkpoint saving logic
+                        checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
+                        # Exclude frozen parameters to save space if needed
+                        model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
+                    elif is_main_process(): # Only the main process saves checkpoints in standard DDP
+                        # Get the model's state dictionary
+                        logger.info(f"6 Total Loss requires grad: {total_loss.requires_grad}")
+                        state_dict = model_without_ddp.state_dict()
+                        # Identify parameters that are frozen (do not require gradients)
+                        param_requires_grad_dict = {
+                            name: param.requires_grad for (name, param) in model_without_ddp.named_parameters()
+                        }
+                        # Create a list of keys corresponding to frozen parameters
+                        keys_to_remove = []
+                        for param_name in state_dict.keys():
+                            if param_name in param_requires_grad_dict and not param_requires_grad_dict[param_name]:
+                                keys_to_remove.append(param_name)
+                        # Remove frozen parameters from the state dictionary before saving
+                        if keys_to_remove:
+                            logger.info(f"Removing {len(keys_to_remove)} frozen parameters from checkpoint: {keys_to_remove}")
+                            for param_name in keys_to_remove:
+                                del state_dict[param_name]
+
+                        # Assemble the checkpoint object including model, optimizer, scheduler states, etc.
+                        save_obj = {
+                            "model": state_dict,
+                            "optimizer": optimizer.state_dict(),
+                            "scheduler": scheduler.state_dict(),
+                            "scaler": scaler.state_dict(), # Important for resuming AMP training
+                            "config": config,             # Save config for reproducibility
+                            "epoch": epoch,               # Current epoch
+                            "global_step": global_step,   # Current step
+                        }
+                        # Define the checkpoint filename
+                        checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:02d}.pth")
+                        # Save the checkpoint object to disk
+                        torch.save(save_obj, checkpoint_filename)
+                        logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
     # --- Training Loop End ---
 
     # Synchronize metrics across all distributed processes before logging final epoch stats
