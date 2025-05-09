@@ -237,44 +237,44 @@ def train(
             # --- Iteration-based Checkpointing ---
             # Save a checkpoint at specified step intervals if `save_iter` > 0
             if config.get('save_iter', 0) and global_step % config.save_iter == 0:
-            if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                # DeepSpeed handles checkpoint saving logic
-                checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
-                # Exclude frozen parameters to save space if needed
-                model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
-            elif is_main_process(): # Only the main process saves checkpoints in standard DDP
-                # Get the model's state dictionary
-                state_dict = model_without_ddp.state_dict()
-                # Identify parameters that are frozen (do not require gradients)
-                param_requires_grad_dict = {
-                    name: param.requires_grad for (name, param) in model_without_ddp.named_parameters()
-                }
-                # Create a list of keys corresponding to frozen parameters
-                keys_to_remove = []
-                for param_name in state_dict.keys():
-                    if param_name in param_requires_grad_dict and not param_requires_grad_dict[param_name]:
-                        keys_to_remove.append(param_name)
-                # Remove frozen parameters from the state dictionary before saving
-                if keys_to_remove:
-                    logger.info(f"Removing {len(keys_to_remove)} frozen parameters from checkpoint: {keys_to_remove}")
-                    for param_name in keys_to_remove:
-                        del state_dict[param_name]
+                if hasattr(config, "deepspeed") and config.deepspeed.enable:
+                    # DeepSpeed handles checkpoint saving logic
+                    checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
+                    # Exclude frozen parameters to save space if needed
+                    model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
+                elif is_main_process(): # Only the main process saves checkpoints in standard DDP
+                    # Get the model's state dictionary
+                    state_dict = model_without_ddp.state_dict()
+                    # Identify parameters that are frozen (do not require gradients)
+                    param_requires_grad_dict = {
+                        name: param.requires_grad for (name, param) in model_without_ddp.named_parameters()
+                    }
+                    # Create a list of keys corresponding to frozen parameters
+                    keys_to_remove = []
+                    for param_name in state_dict.keys():
+                        if param_name in param_requires_grad_dict and not param_requires_grad_dict[param_name]:
+                            keys_to_remove.append(param_name)
+                    # Remove frozen parameters from the state dictionary before saving
+                    if keys_to_remove:
+                        logger.info(f"Removing {len(keys_to_remove)} frozen parameters from checkpoint: {keys_to_remove}")
+                        for param_name in keys_to_remove:
+                            del state_dict[param_name]
 
-                # Assemble the checkpoint object including model, optimizer, scheduler states, etc.
-                save_obj = {
-                    "model": state_dict,
-                    "optimizer": optimizer.state_dict(),
-                    "scheduler": scheduler.state_dict(),
-                    "scaler": scaler.state_dict(), # Important for resuming AMP training
-                    "config": config,             # Save config for reproducibility
-                    "epoch": epoch,               # Current epoch
-                    "global_step": global_step,   # Current step
-                }
-                # Define the checkpoint filename
-                checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:02d}.pth")
-                # Save the checkpoint object to disk
-                torch.save(save_obj, checkpoint_filename)
-                logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
+                    # Assemble the checkpoint object including model, optimizer, scheduler states, etc.
+                    save_obj = {
+                        "model": state_dict,
+                        "optimizer": optimizer.state_dict(),
+                        "scheduler": scheduler.state_dict(),
+                        "scaler": scaler.state_dict(), # Important for resuming AMP training
+                        "config": config,             # Save config for reproducibility
+                        "epoch": epoch,               # Current epoch
+                        "global_step": global_step,   # Current step
+                    }
+                    # Define the checkpoint filename
+                    checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:02d}.pth")
+                    # Save the checkpoint object to disk
+                    torch.save(save_obj, checkpoint_filename)
+                    logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
     # --- Training Loop End ---
 
     # Synchronize metrics across all distributed processes before logging final epoch stats
