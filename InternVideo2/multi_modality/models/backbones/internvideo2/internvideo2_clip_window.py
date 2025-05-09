@@ -224,62 +224,53 @@ class WindowInternVideo(InternVideo2):
     def forward_update(self, frame, prev_embedding):
         """
         Updates the embedding with a single new frame using the UpdateTransformer.
-
         Args:
             frame: Input frame [B, C, H, W].
-            prev_embedding: The embedding from the previous step [B, L, C].
-                            Can be None for the very first update step,
-                            in which case it might be initialized or handled
-                            specifically by the UpdateTransformer.
-
+            prev_embedding: The POOLED embedding from the previous step [B, C_embed_dim].
         Returns:
-            torch.Tensor: The updated embedding [B, L, C]. This tensor will
-                          have requires_grad=True if frame, prev_embedding,
-                          or UpdateTransformer parameters require gradients.
+            torch.Tensor: The updated POOLED embedding [B, C_embed_dim].
         """
         if not (len(frame.shape) == 4):
-             raise ValueError(f"forward_update expects frame shape [B, C, H, W], but got {frame.shape}")
-        if prev_embedding is not None and not (len(prev_embedding.shape) == 3):
-             raise ValueError(f"forward_update expects prev_embedding shape [B, L, C] or None, but got {prev_embedding.shape}")
+                raise ValueError(f"forward_update expects frame shape [B, C, H, W], but got {frame.shape}")
 
-        # Ensure prev_embedding is on the correct device if not None
+        # --- MODIFIED CHECK ---
+        # Original check that caused the error:
+        # if prev_embedding is not None and not (len(prev_embedding.shape) == 3):
+        #      raise ValueError(f"forward_update expects prev_embedding shape [B, L, C] or None, but got {prev_embedding.shape}")
+        # Modified check assuming prev_embedding is the [B, C_embed_dim] pooled embedding:
         if prev_embedding is not None:
-             prev_embedding = prev_embedding.to(frame.device)
+            if not (len(prev_embedding.shape) == 2 and prev_embedding.shape[1] == self.embed_dim):
+                raise ValueError(f"forward_update expects prev_embedding shape [B, embed_dim ({self.embed_dim})] or None, but got {prev_embedding.shape}")
+            prev_embedding = prev_embedding.to(frame.device)
         else:
-             # Handle case where prev_embedding is None (e.g., first frame after a full forward)
-             # The UpdateTransformer might need to handle this, or you ensure
-             # prev_embedding is *always* initialized by forward_full or a dummy.
-             # A common approach is to initialize prev_embedding with zeros or a learned parameter
-             # if there's no preceding full forward pass.
-             # Let's assume for this design that prev_embedding is initialized externally
-             # via a call to forward_full or a dedicated initial state logic.
-             # For robustness, we might add a learned initial state:
-             # if not hasattr(self, 'initial_state'):
-             #    self.initial_state = nn.Parameter(torch.randn(1, self.initial_seq_len, self.embed_dim))
-             # prev_embedding = self.initial_state.repeat(frame.shape[0], 1, 1) # Repeat for batch size
-             # OR raise an error if prev_embedding is expected
-             raise ValueError("prev_embedding cannot be None after the initial step. Initialize with forward_full.")
+            # Handle case where prev_embedding is None (e.g., very first update if not initialized by forward_full)
+            # This might indicate a logic error in the training loop if prev_embedding is expected.
+            # For now, let's assume training loop always initializes it.
+            # If UpdateTransformer requires a non-None prev_embedding, this path needs care.
+            # Given your training loop initializes it from forward_full, this 'else' might not be hit.
+            raise ValueError("prev_embedding cannot be None after the initial step in the current training logic.")
 
 
-        # Prepare the single frame for patch embedding
-        # patch_embed likely expects [B, C, T, H, W], so add a T=1 dimension
         frame_5d = frame.unsqueeze(2) # Shape [B, C, 1, H, W]
+        new_frame_tokens = self.patch_embed(frame_5d) # Expected output: e.g., [B, 1, num_patches_one_frame, embed_dim]
 
-        # Get patch tokens for the new frame using the base model's patch_embed
-        # Assuming patch_embed outputs [B, 1, L_patch, C] from [B, C, 1, H, W]
-        # or potentially needs reshaping like in the dummy base class
-        new_frame_tokens = self.patch_embed(frame_5d) # Shape might vary based on patch_embed
+        # Reshape new_frame_tokens to [B, L_new, C_embed_dim]
+        # L_new here is the number of patch tokens for a single frame.
+        B_nft, T_nft, L_patch_nft, C_nft = new_frame_tokens.shape # T_nft should be 1
+        new_frame_tokens = new_frame_tokens.view(B_nft, T_nft * L_patch_nft, self.embed_dim)
 
-        # Assuming patch_embed output needs reshaping to [B, L_new, C]
-        B, *remaining_dims = new_frame_tokens.shape
-        new_frame_tokens = new_frame_tokens.view(B, -1, self.embed_dim) # Reshape to [B, L_new, C]
-        L_new = new_frame_tokens.shape[1]
-
-
+        # This call now assumes that UpdateTransformer can take:
+        # prev_embedding: [B, C_embed_dim]
+        # new_frame_tokens: [B, L_new, C_embed_dim]
+        # And returns an updated embedding of shape: [B, C_embed_dim]
         updated_embedding = self.update_transformer(
             prev_embedding,
             new_frame_tokens
         )
+
+        # Ensure updated_embedding is also [B, C_embed_dim]
+        if not (len(updated_embedding.shape) == 2 and updated_embedding.shape[0] == frame.shape[0] and updated_embedding.shape[1] == self.embed_dim):
+            raise ValueError(f"UpdateTransformer produced an output of shape {updated_embedding.shape}, but expected [B, {self.embed_dim}]")
 
         return updated_embedding
 
