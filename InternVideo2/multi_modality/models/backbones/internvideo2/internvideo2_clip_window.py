@@ -28,8 +28,6 @@ class WindowInternVideo_old(InternVideo2):
             num_layers=8
         )
 
-        self.grid_size = self.patch_embed.grid_size
-
         # Initialize state
         self.reset_state()
 
@@ -192,6 +190,8 @@ class WindowInternVideo(InternVideo2):
         # num_frames and tubelet_size are important for patch_embed and pos_embed consistency
         self.num_model_frames = self.patch_embed.grid_size[0] * self.patch_embed.tubelet_size
         self.model_tubelet_size = self.patch_embed.tubelet_size
+
+        self.grid_size = self.patch_embed.grid_size
 
 
     def _extract_pre_projector_features(self, x, use_image=False):
