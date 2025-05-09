@@ -129,39 +129,62 @@ def train(
 
             # Iterate over each frame in the video (time dimension)
             B, C, T, H, W = image.shape
+            assert T >= MODEL_MAX_FRAMES, f"Video has {T} frames, needs at least {MODEL_MAX_FRAMES}."
 
-            assert T >= MODEL_MAX_FRAMES, f"Video has shape {image.shape}, T should be >= {MODEL_MAX_FRAMES}."
+            # Define a pooling function (make sure this aligns with how InternVideo2 gets its final embedding)
+            def pool_embedding_sequence(emb_sequence):
+                # emb_sequence is [B, L, C_embed_dim]
+                if emb_sequence.ndim == 3:
+                    # Example: Mean pooling. If InternVideo2 uses a CLS token, adapt this.
+                    # Or if InternVideo2 has a specific pooling layer (e.g. self.temporal_pool)
+                    # you might want to use that concept if applicable.
+                    return emb_sequence.mean(dim=1) # -> [B, C_embed_dim]
+                elif emb_sequence.ndim == 2: # Already pooled
+                    return emb_sequence
+                else:
+                    raise ValueError(f"Unexpected embedding shape for pooling: {emb_sequence.shape}")
 
-            # Extract the first MODEL_MAX_FRAMES frames from the video.
-            num_frames = min(T, MODEL_MAX_FRAMES)
-            frames = image[:, :, :num_frames, :, :]
-
-            # Calculate full forward pass embedding from the vision encoder.
+            # --- Initial Step ---
+            # Get the embedding for the very first window (frames 0 to MODEL_MAX_FRAMES-1)
+            # This will serve as the "previous_embedding" for the first call to forward_update
+            initial_window_frames = image[:, :, :MODEL_MAX_FRAMES, :, :] # e.g., frames 0..7 if MODEL_MAX_FRAMES=8
             with torch.no_grad():
-                initial_embedding = model.vision_encoder.forward_full(frames)
-
-            prev_embedding = initial_embedding.clone()  # Keep track of the previous full embedding.
+                # Get the unpooled sequence from the base model
+                prev_emb_sequence = model_without_ddp.vision_encoder.forward_full(initial_window_frames)
+                # Pool it to be [B, C_embed_dim]
+                # This pooled embedding is for the window (0 to MODEL_MAX_FRAMES-1)
+                pooled_prev_window_embedding = pool_embedding_sequence(prev_emb_sequence.clone().detach())
 
             # Skip the first MODEL_MAX_FRAMES frames
-            for t in range(MODEL_MAX_FRAMES, T):
-                frame = image[:, :, t, :, :]
+            for t_new_frame_idx in range(MODEL_MAX_FRAMES, T):
+                new_frame = image[:, :, t_new_frame_idx, :, :]
 
                 if log_backprop:
-                    logger.info(f"On frame [{t-MODEL_MAX_FRAMES}:{t}], the previous embedding's shape is {prev_embedding.shape}")
+                    logger.info(f"On frame [{t_new_frame_idx-MODEL_MAX_FRAMES}:{t_new_frame_idx}], the previous embedding's shape is {pooled_prev_window_embedding.shape}")
 
-                window_embedding = model.vision_encoder.forward_update(frame, prev_embedding = prev_embedding) # New embedding using the UpdateTransformer
+                predicted_pooled_current_window_embedding = model.vision_encoder.forward_update( # New embedding using the UpdateTransformer
+                    new_frame,
+                    prev_embedding = pooled_prev_window_embedding
+                )
 
-                with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
-                    full_forward_embedding = model.vision_encoder.forward_full(frames[:, :, -MODEL_MAX_FRAMES:, :, :])
+                # --- Calculate Target for the current window ---
+                # The current window starts at (t_new_frame_idx - MODEL_MAX_FRAMES + 1)
+                # and ends at t_new_frame_idx (inclusive).
+                current_window_start_idx = t_new_frame_idx - MODEL_MAX_FRAMES + 1
+                current_window_end_idx = t_new_frame_idx + 1 # Slice end index is exclusive
 
-                prev_embedding = full_forward_embedding.clone()
+                actual_current_window_frames = image[:, :, current_window_start_idx:current_window_end_idx, :, :]
 
-                temp_loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
+                with torch.no_grad():
+                    # Get the unpooled sequence for the current window's target
+                    target_emb_sequence_current_window = model_without_ddp.vision_encoder.forward_full(actual_current_window_frames)
+                    # Pool it to get the target [B, C_embed_dim]
+                    target_pooled_current_window_embedding = pool_embedding_sequence(target_emb_sequence_current_window)
 
-                loss_dict = dict(loss_mse = temp_loss)
-
-                # Calculate the total loss by summing the individual weighted loss components
-                # Note: Loss weights are typically applied within the model's forward or criterion
+                # --- Calculate Loss ---
+                # Both predicted and target are now [B, C_embed_dim]
+                loss = torch.nn.functional.mse_loss(predicted_pooled_current_window_embedding, target_pooled_current_window_embedding)
+                loss_dict = dict(loss_mse=loss)
                 total_loss = sum(loss_dict.values())
 
                 if log_backprop:
@@ -286,6 +309,14 @@ def train(
                         # Save the checkpoint object to disk
                         torch.save(save_obj, checkpoint_filename)
                         logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
+
+
+                # --- Prepare for next iteration ---
+                # The target embedding of the current window becomes the "previous" embedding for the next update.
+                # Detach to prevent gradients from flowing back multiple steps if not intended,
+                # and it's good practice since it's a target from a no_grad block.
+                pooled_prev_window_embedding = target_pooled_current_window_embedding.clone().detach()
+
     # --- Training Loop End ---
 
     # Synchronize metrics across all distributed processes before logging final epoch stats
