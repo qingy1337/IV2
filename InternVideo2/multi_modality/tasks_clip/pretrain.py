@@ -161,7 +161,7 @@ def train(
 
                 temp_loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 
-                loss_dict = dict(total_mse = temp_loss)
+                loss_dict = dict(loss_mse = temp_loss)
 
                 # Calculate the total loss by summing the individual weighted loss components
                 # Note: Loss weights are typically applied within the model's forward or criterion
