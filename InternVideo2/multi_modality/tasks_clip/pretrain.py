@@ -176,7 +176,7 @@ def train(
             total_loss = total_losses[i]
             loss_dict = loss_dicts[i]
 
-            logger.info(f"Total Loss requires grad: {total_loss.requires_grad}")
+            logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
             # --- Backpropagation and Optimization ---
             # Check if using DeepSpeed for optimized distributed training
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
@@ -184,7 +184,7 @@ def train(
                 model.backward(total_loss) # Use DeepSpeed's backward method
                 model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
                 logger.info("BACKWARD SUCCESSFUL!")
-                logger.info(f"Total Loss requires grad: {total_loss.requires_grad}")
+                logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
             else:
                 # Standard PyTorch / AMP training step
                 # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
@@ -212,7 +212,7 @@ def train(
                     scaler.update()
                     scheduler.step()      # Update learning rate
 
-            logger.info(f"Total Loss requires grad: {total_loss.requires_grad}")
+            logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
             # --- Logging Metrics ---
             # Update metric logger with the values of individual loss components for the current batch
             # loss_dict = {"loss_mse": loss_for_logging}
@@ -237,7 +237,7 @@ def train(
 
             # Log Step Info
             logger.info(f"Training -- Step [{global_step:,}]")
-            logger.info(f"Total Loss requires grad: {total_loss.requires_grad}")
+            logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
 
             # --- Debugging Hooks ---
             # Optional early termination conditions for debugging
@@ -251,6 +251,7 @@ def train(
             # --- Iteration-based Checkpointing ---
             # Save a checkpoint at specified step intervals if `save_iter` > 0
             if config.get('save_iter', 0) and global_step % config.save_iter == 0:
+                logger.info(f"5 Total Loss requires grad: {total_loss.requires_grad}")
                 if hasattr(config, "deepspeed") and config.deepspeed.enable:
                     # DeepSpeed handles checkpoint saving logic
                     checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
@@ -258,7 +259,7 @@ def train(
                     model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
                 elif is_main_process(): # Only the main process saves checkpoints in standard DDP
                     # Get the model's state dictionary
-                    logger.info(f"Total Loss requires grad: {total_loss.requires_grad}")
+                    logger.info(f"6 Total Loss requires grad: {total_loss.requires_grad}")
                     state_dict = model_without_ddp.state_dict()
                     # Identify parameters that are frozen (do not require gradients)
                     param_requires_grad_dict = {
