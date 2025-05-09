@@ -131,8 +131,6 @@ def train(
 
             assert T >= MODEL_MAX_FRAMES, f"Video has shape {image.shape}, T should be >= {MODEL_MAX_FRAMES}."
 
-            model.vision_encoder.reset_state()
-
             # Extract the first MODEL_MAX_FRAMES frames from the video.
             num_frames = min(T, MODEL_MAX_FRAMES)
             frames = image[:, :, :num_frames, :, :]
