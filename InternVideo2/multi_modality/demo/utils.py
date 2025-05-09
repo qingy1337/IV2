@@ -113,7 +113,7 @@ def retrieve_text_window(
     # new frame is a list with one frame.
     frames_tensor = frames2tensor([new_frame], fnum=1, target_size=(size_t, size_t), device=device)
 
-    print(f"Frames tensor has shape {frames_tensor.shape}")
+    # print(f"Frames tensor has shape {frames_tensor.shape}")
 
     vid_feat, raw_vision_embeds = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
 
@@ -133,8 +133,8 @@ def retrieve_text_window(
         if log: print("Using Cached")
         text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
 
-    print(f"Video feature is of shape {vid_feat.shape}")
-    print(f"Text feature is of shape {text_feats_tensor.shape}")
+    # print(f"Video feature is of shape {vid_feat.shape}")
+    # print(f"Text feature is of shape {text_feats_tensor.shape}")
     probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
 
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
