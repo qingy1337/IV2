@@ -142,7 +142,7 @@ log_freq = 1
 seed = 42
 
 save_latest = False
-save_iter = 2000
+save_iter = 5000
 auto_resume = True
 pretrained_path = ""  # path to pretrained model weights, for resume only?
 

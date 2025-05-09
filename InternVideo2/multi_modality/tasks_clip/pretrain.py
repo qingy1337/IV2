@@ -36,7 +36,7 @@ def train(
     config,               # Configuration object containing hyperparameters and settings
     data_type,            # The data type for AMP (e.g., torch.float16, torch.bfloat16)
     skip_num=0,            # Number of batches to skip at the beginning of the epoch (for resuming)
-    log_backprop=False,   # Debugging logs for backprop
+    log_debug=False,   # Debugging logs for backprop
 ):
     """
     Performs one epoch of training.
@@ -108,7 +108,8 @@ def train(
         image = image.to(device, non_blocking=True) # Use non_blocking for potential speedup with pinned memory
         idx = idx.to(device, non_blocking=True)     # Index, potentially used for contrastive learning negative sampling
 
-        logger.info(f"Logging data for debugging: image shape: {image.shape}, text: {text}, idx: {idx}")
+        if log_debug:
+            logger.info(f"Logging data for debugging: image shape: {image.shape}, text: {text}, idx: {idx}")
 
         # Tokenize text data and move it to the device
         text_input = tokenizer(text).to(device)
@@ -159,7 +160,7 @@ def train(
             for t_new_frame_idx in range(MODEL_MAX_FRAMES, T):
                 new_frame = image[:, :, t_new_frame_idx, :, :]
 
-                if log_backprop:
+                if log_debug:
                     logger.info(f"On frame [{t_new_frame_idx-MODEL_MAX_FRAMES}:{t_new_frame_idx}], the previous embedding's shape is {pooled_prev_window_embedding.shape}")
 
                 predicted_pooled_current_window_embedding = model.vision_encoder.forward_update( # New embedding using the UpdateTransformer
@@ -180,14 +181,17 @@ def train(
                     target_emb_sequence_current_window = model_without_ddp.vision_encoder.forward_full(actual_current_window_frames)
                     # Pool it to get the target [B, C_embed_dim]
                     target_pooled_current_window_embedding = pool_embedding_sequence(target_emb_sequence_current_window)
-                    target_norm = torch.linalg.norm(target_pooled_current_window_embedding, dim=-1).mean()
-                    logger.info(f"Target embedding mean L2 norm: {target_norm.item():.4f}")
-                    # Optionally, print min/max values
-                    target_min = target_pooled_current_window_embedding.min()
-                    target_max = target_pooled_current_window_embedding.max()
-                    logger.info(f"Target embedding min: {target_min.item():.4f}, max: {target_max.item():.4f}")
 
-                logger.info(f"Norm of predicted_pooled_current_window_embedding: {predicted_pooled_current_window_embedding.norm()}")
+                    if log_debug:
+                        target_norm = torch.linalg.norm(target_pooled_current_window_embedding, dim=-1).mean()
+                        logger.info(f"Target embedding mean L2 norm: {target_norm.item():.4f}")
+                        # Optionally, print min/max values
+                        target_min = target_pooled_current_window_embedding.min()
+                        target_max = target_pooled_current_window_embedding.max()
+                        logger.info(f"Target embedding min: {target_min.item():.4f}, max: {target_max.item():.4f}")
+
+                if log_debug:
+                    logger.info(f"Norm of predicted_pooled_current_window_embedding: {predicted_pooled_current_window_embedding.norm()}")
 
                 # --- Calculate Loss ---
                 # Both predicted and target are now [B, C_embed_dim]
@@ -195,7 +199,7 @@ def train(
                 loss_dict = dict(loss_mse=loss)
                 total_loss = sum(loss_dict.values())
 
-                if log_backprop:
+                if log_debug:
                     logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
                 # --- Backpropagation and Optimization ---
                 # Check if using DeepSpeed for optimized distributed training
@@ -204,7 +208,7 @@ def train(
                     model.backward(total_loss) # Use DeepSpeed's backward method
                     model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
 
-                    if log_backprop:
+                    if log_debug:
                         logger.info("BACKWARD SUCCESSFUL!")
                         logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
                 else:
@@ -234,7 +238,7 @@ def train(
                         scaler.update()
                         scheduler.step()      # Update learning rate
 
-                if log_backprop:
+                if log_debug:
                     logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
                 # --- Logging Metrics ---
                 # Update metric logger with the values of individual loss components for the current batch
@@ -259,8 +263,10 @@ def train(
                 global_step += 1
 
                 # Log Step Info
-                logger.info(f"Training -- Step [{global_step:,}]")
-                if log_backprop:
+                if global_step % 100 == 0:
+                    logger.info(f"+{'-'*50}\n| Training @ step [{global_step:,}]")
+
+                if log_debug:
                     logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
 
                 # --- Debugging Hooks ---
@@ -275,7 +281,7 @@ def train(
                 # --- Iteration-based Checkpointing ---
                 # Save a checkpoint at specified step intervals if `save_iter` > 0
                 if config.get('save_iter', 0) and global_step % config.save_iter == 0:
-                    if log_backprop:
+                    if log_debug:
                         logger.info(f"5 Total Loss requires grad: {total_loss.requires_grad}")
                     if hasattr(config, "deepspeed") and config.deepspeed.enable:
                         # DeepSpeed handles checkpoint saving logic
@@ -284,7 +290,7 @@ def train(
                         model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
                     elif is_main_process(): # Only the main process saves checkpoints in standard DDP
                         # Get the model's state dictionary
-                        if log_backprop:
+                        if log_debug:
                             logger.info(f"6 Total Loss requires grad: {total_loss.requires_grad}")
                         state_dict = model_without_ddp.state_dict()
                         # Identify parameters that are frozen (do not require gradients)
