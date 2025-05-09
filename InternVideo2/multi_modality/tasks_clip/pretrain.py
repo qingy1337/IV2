@@ -156,7 +156,7 @@ def train(
 
                 # with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
                 model.vision_encoder.reset_state()
-                full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True)
+                full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True).detach()
 
                 temp_loss += torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 
