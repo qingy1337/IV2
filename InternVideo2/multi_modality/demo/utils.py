@@ -115,7 +115,7 @@ def retrieve_text_window(
 
     print(f"Frames tensor has shape {frames_tensor.shape}")
 
-    vid_feat = vlm.get_vid_feat(torch.squeeze(frames_tensor, 2), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
+    vid_feat = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
 
     calculate = False
     for t in texts:
