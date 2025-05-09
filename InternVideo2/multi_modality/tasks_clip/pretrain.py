@@ -174,6 +174,7 @@ def train(
                 # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
                 model.backward(total_loss) # Use DeepSpeed's backward method
                 model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
+                logger.info("BACKWARD SUCCESSFUL!")
             else:
                 # Standard PyTorch / AMP training step
                 # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
