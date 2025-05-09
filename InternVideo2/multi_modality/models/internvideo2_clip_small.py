@@ -164,7 +164,7 @@ class InternVideo2_CLIP_small(nn.Module):
         T = image.shape[1]
         use_image = True if T == 1 else False
 
-        if not prev_embedding is None:
+        if prev_embedding is not None:
             vision_embeds = self.vision_encoder.forward_update(image, prev_embedding = prev_embedding)
         else:
             image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
