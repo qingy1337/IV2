@@ -139,9 +139,7 @@ def train(
             # Calculate full forward pass embedding from the vision encoder.
             initial_embedding = model.vision_encoder(frames, force_full_forward = True)
 
-            # Store the total MSE loss, so that it can be averaged later.
-            total_mse = torch.tensor(0.0, device=image.device)  # Keeps gradient history
-            window_count = 0
+            total_mse = []
 
             # Skip the first MODEL_MAX_FRAMES frames
             for t in range(MODEL_MAX_FRAMES, T):
@@ -159,89 +157,86 @@ def train(
 
                 loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 
-                total_mse += loss
+                total_mse.append(loss)
 
-                window_count += 1
-
-            loss_mse = total_mse / window_count # Average MSE Loss over sliding windows.
-
-            loss_dict = dict(
-                loss_mse = loss_mse
-            )
+            loss_dicts = [dict(
+                loss_mse = x
+            ) for x in total_mse] # list of dicts
 
             # Calculate the total loss by summing the individual weighted loss components
             # Note: Loss weights are typically applied within the model's forward or criterion
-            total_loss = sum(loss_dict.values())
+            total_losses = [sum(x.values()) for x in loss_dicts]
 
-        # --- Backpropagation and Optimization ---
-        # Check if using DeepSpeed for optimized distributed training
-        if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
-            model.backward(total_loss) # Use DeepSpeed's backward method
-            model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
-        else:
-            # Standard PyTorch / AMP training step
-            # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
-            if not config.use_half_precision or config.get('use_bf16', True):
-                # --- Standard Precision or BFloat16 ---
-                optimizer.zero_grad() # Reset gradients from previous step
-                total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
-                # Apply gradient clipping if specified in the config to prevent exploding gradients
-                if config.optimizer.max_grad_norm > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                optimizer.step()      # Update model parameters based on computed gradients
-                scheduler.step()      # Update learning rate according to the schedule
+        for total_loss in total_losses:
+            # --- Backpropagation and Optimization ---
+            # Check if using DeepSpeed for optimized distributed training
+            if hasattr(config, "deepspeed") and config.deepspeed.enable:
+                # DeepSpeed engine handles backward pass, gradient synchronization, and optimizer step
+                model.backward(total_loss) # Use DeepSpeed's backward method
+                model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
             else:
-                # --- Float16 Mixed Precision with GradScaler ---
-                optimizer.zero_grad() # Reset gradients
-                # Scale the loss before backpropagation to prevent gradient underflow with float16
-                scaler.scale(total_loss).backward()
-                # Apply gradient clipping if specified (must unscale gradients first)
-                if config.optimizer.max_grad_norm > 0:
-                    scaler.unscale_(optimizer) # Unscale gradients before clipping
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                # scaler.step() first unscales gradients, checks for inf/NaNs, then calls optimizer.step()
-                scaler.step(optimizer)
-                # scaler.update() adjusts the scaling factor for the next iteration
-                scaler.update()
-                scheduler.step()      # Update learning rate
+                # Standard PyTorch / AMP training step
+                # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
+                if not config.use_half_precision or config.get('use_bf16', True):
+                    # --- Standard Precision or BFloat16 ---
+                    optimizer.zero_grad() # Reset gradients from previous step
+                    total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
+                    # Apply gradient clipping if specified in the config to prevent exploding gradients
+                    if config.optimizer.max_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                    optimizer.step()      # Update model parameters based on computed gradients
+                    scheduler.step()      # Update learning rate according to the schedule
+                else:
+                    # --- Float16 Mixed Precision with GradScaler ---
+                    optimizer.zero_grad() # Reset gradients
+                    # Scale the loss before backpropagation to prevent gradient underflow with float16
+                    scaler.scale(total_loss).backward()
+                    # Apply gradient clipping if specified (must unscale gradients first)
+                    if config.optimizer.max_grad_norm > 0:
+                        scaler.unscale_(optimizer) # Unscale gradients before clipping
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                    # scaler.step() first unscales gradients, checks for inf/NaNs, then calls optimizer.step()
+                    scaler.step(optimizer)
+                    # scaler.update() adjusts the scaling factor for the next iteration
+                    scaler.update()
+                    scheduler.step()      # Update learning rate
 
-        # --- Logging Metrics ---
-        # Update metric logger with the values of individual loss components for the current batch
-        for loss_name in active_loss_names:
-            loss_value = loss_dict[loss_name]
-            # Ensure value is a standard Python number for logging
-            loss_value = loss_value if isinstance(loss_value, float) else loss_value.item()
-            metric_logger.update(**{f"{media_type}-{loss_name}": loss_value}) # Log loss per media type
-        # Update metric logger with the current learning rate and model temperature
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(temperature=model_without_ddp.temp.item())
+            # --- Logging Metrics ---
+            # Update metric logger with the values of individual loss components for the current batch
+            for loss_name in active_loss_names:
+                loss_value = loss_dict[loss_name]
+                # Ensure value is a standard Python number for logging
+                loss_value = loss_value if isinstance(loss_value, float) else loss_value.item()
+                metric_logger.update(**{f"{media_type}-{loss_name}": loss_value}) # Log loss per media type
+            # Update metric logger with the current learning rate and model temperature
+            metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+            metric_logger.update(temperature=model_without_ddp.temp.item())
 
-        # Log aggregated metrics to Weights & Biases (wandb) periodically if enabled
-        if is_main_process() and config.wandb.enable and global_step % log_freq == 0:
-            # Get the globally averaged metrics from the logger (synchronized across processes if distributed)
-            averaged_logs = metric_logger.get_global_avg_dict()
-            # Send the logs to wandb, associated with the current global step
-            log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
+            # Log aggregated metrics to Weights & Biases (wandb) periodically if enabled
+            if is_main_process() and config.wandb.enable and global_step % log_freq == 0:
+                # Get the globally averaged metrics from the logger (synchronized across processes if distributed)
+                averaged_logs = metric_logger.get_global_avg_dict()
+                # Send the logs to wandb, associated with the current global step
+                log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
 
-        # Increment the global step counter
-        global_step += 1
+            # Increment the global step counter
+            global_step += 1
 
-        # Log Step Info
-        logger.info(f"Training -- Step [{global_step:,}]")
+            # Log Step Info
+            logger.info(f"Training -- Step [{global_step:,}]")
 
-        # --- Debugging Hooks ---
-        # Optional early termination conditions for debugging
-        if config.debug and global_step % 20 == 0:
-            logger.info("Debug mode: breaking training loop early (step condition).")
-            break
-        if config.debug and global_step % (2 * log_freq + 3) == 0: # Another arbitrary break condition
-            logger.info("Debug mode: breaking training loop early (log freq condition).")
-            break
+            # --- Debugging Hooks ---
+            # Optional early termination conditions for debugging
+            if config.debug and global_step % 20 == 0:
+                logger.info("Debug mode: breaking training loop early (step condition).")
+                break
+            if config.debug and global_step % (2 * log_freq + 3) == 0: # Another arbitrary break condition
+                logger.info("Debug mode: breaking training loop early (log freq condition).")
+                break
 
-        # --- Iteration-based Checkpointing ---
-        # Save a checkpoint at specified step intervals if `save_iter` > 0
-        if config.get('save_iter', 0) and global_step % config.save_iter == 0:
+            # --- Iteration-based Checkpointing ---
+            # Save a checkpoint at specified step intervals if `save_iter` > 0
+            if config.get('save_iter', 0) and global_step % config.save_iter == 0:
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
                 # DeepSpeed handles checkpoint saving logic
                 checkpoint_tag = f"ckpt_iter{global_step:02d}.pth"
@@ -357,7 +352,7 @@ def main(config):
     train_loaders, test_name2loaders, train_media_types = setup_dataloaders(
         config, mode=config.mode
     )
-    num_steps_per_epoch = sum(len(d) for d in train_loaders)
+    num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
 
     config.scheduler.num_training_steps = num_steps_per_epoch * config.scheduler.epochs
     config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
