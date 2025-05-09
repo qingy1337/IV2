@@ -180,6 +180,14 @@ def train(
                     target_emb_sequence_current_window = model_without_ddp.vision_encoder.forward_full(actual_current_window_frames)
                     # Pool it to get the target [B, C_embed_dim]
                     target_pooled_current_window_embedding = pool_embedding_sequence(target_emb_sequence_current_window)
+                    target_norm = torch.linalg.norm(target_pooled_current_window_embedding, dim=-1).mean()
+                    logger.info(f"Target embedding mean L2 norm: {target_norm.item():.4f}")
+                    # Optionally, print min/max values
+                    target_min = target_pooled_current_window_embedding.min()
+                    target_max = target_pooled_current_window_embedding.max()
+                    logger.info(f"Target embedding min: {target_min.item():.4f}, max: {target_max.item():.4f}")
+
+                logger.info(f"Norm of predicted_pooled_current_window_embedding: {predicted_pooled_current_window_embedding.norm()}")
 
                 # --- Calculate Loss ---
                 # Both predicted and target are now [B, C_embed_dim]
