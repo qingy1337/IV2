@@ -147,6 +147,6 @@ auto_resume = True
 pretrained_path = ""  # path to pretrained model weights, for resume only?
 
 deepspeed = dict(
-    enable=True,
+    enable=False,
     stage=1,
 )
