@@ -10,6 +10,7 @@ import torch.distributed as dist
 import wandb
 from torch.utils.data import ConcatDataset
 
+import copy
 from dataset.serialize import local_broadcast_process_authkey
 from dataset import MetaLoader_rs, create_dataset, create_loader, create_sampler, create_stateful_sampler
 from models import *
@@ -168,6 +169,7 @@ def train(
             total_losses = [sum(x.values()) for x in loss_dicts]
 
         for total_loss in total_losses:
+            copied_loss = copy.deepcopy(total_loss)
             # --- Backpropagation and Optimization ---
             # Check if using DeepSpeed for optimized distributed training
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
@@ -204,6 +206,7 @@ def train(
 
             # --- Logging Metrics ---
             # Update metric logger with the values of individual loss components for the current batch
+            loss_dict = {"loss_mse": copied_loss}
             for loss_name in active_loss_names:
                 loss_value = loss_dict[loss_name]
                 # Ensure value is a standard Python number for logging
