@@ -139,10 +139,6 @@ def train(
             with torch.no_grad():
                 initial_embedding = model.vision_encoder.forward_full(frames)
 
-            total_mse = []
-
-            temp_loss = torch.tensor(0.0, device=image.device)  # Keeps gradient history
-
             prev_embedding = initial_embedding.clone()  # Keep track of the previous full embedding.
 
             # Skip the first MODEL_MAX_FRAMES frames
@@ -153,7 +149,7 @@ def train(
                 # | frame now has shape [B, C, H, W]  |
                 # `-----------------------------------'
 
-                window_embedding = model.vision_encoder(frame, prev_embedding = prev_embedding) # New embedding using the UpdateTransformer
+                window_embedding = model.vision_encoder.forward_update(frame, prev_embedding = prev_embedding) # New embedding using the UpdateTransformer
 
                 with torch.no_grad(): # Now calculate the original model's embeddings & do MSE loss
                     full_forward_embedding = model.vision_encoder.forward_full(frames[:, :, -MODEL_MAX_FRAMES:, :, :])
