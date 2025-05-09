@@ -142,6 +142,8 @@ def train(
 
             total_mse = []
 
+            temp_loss = torch.tensor(0.0, device=image.device)  # Keeps gradient history
+
             # Skip the first MODEL_MAX_FRAMES frames
             for t in range(MODEL_MAX_FRAMES, T):
                 frame = image[:, :, t, :, :]
@@ -156,9 +158,11 @@ def train(
                     model.vision_encoder.reset_state()
                     full_forward_embedding = model.vision_encoder(frames[:, :, -MODEL_MAX_FRAMES:, :, :], force_full_forward = True)
 
-                loss = torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
+                temp_loss += torch.nn.functional.mse_loss(full_forward_embedding, window_embedding)
 
-                total_mse.append(loss)
+                total_mse.append(temp_loss.clone())
+
+                temp_loss = torch.tensor(0.0, device=image.device)  # Keeps gradient history
 
             loss_dicts = [dict(
                 loss_mse = x
