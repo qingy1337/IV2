@@ -262,9 +262,10 @@ def train(
                 # Increment the global step counter
                 global_step += 1
 
-                # Log Step Info
+                # Log a Divider
                 if global_step % 100 == 0:
-                    logger.info(f"+{'-'*50}\n| Training @ step [{global_step:,}]")
+                    logger.info(f"+{'─'*50}")
+                    logger.info(f"")
 
                 if log_debug:
                     logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
