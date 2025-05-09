@@ -386,3 +386,107 @@ class WindowInternVideo(InternVideo2):
             raise ValueError(f"UpdateTransformer produced an output of shape {updated_embedding.shape}, but expected [B, {self.embed_dim}]")
 
         return updated_embedding
+
+
+class UpdateTransformer(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        mlp_ratio: float,
+        qkv_bias: bool,
+        norm_layer,
+        num_layers: int = 8  # Smaller than main transformer
+    ):
+        super().__init__()
+
+        # Query token to extract updated embedding
+        self.query_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+
+        # Layers to process update
+        self.layers = nn.ModuleList([
+            UpdateLayer(
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                norm_layer=norm_layer
+            ) for _ in range(num_layers)
+        ])
+
+        # Initialize query token
+        trunc_normal_(self.query_token, std=.02)
+
+    def forward(self, prev_embedding, new_frame_tokens):
+        # prev_embedding: [B, embed_dim]
+        # new_frame_tokens: [B, 256, embed_dim] (256 tokens from new frame)
+
+        # Expand prev_embedding for attention
+        prev_embedding = prev_embedding.unsqueeze(1)  # [B, 1, embed_dim]
+
+        # Start with query token
+        x = self.query_token.expand(prev_embedding.shape[0], -1, -1)
+
+        # Process through update layers
+        for layer in self.layers:
+            x = layer(x, prev_embedding, new_frame_tokens)
+
+        return x.squeeze(1)  # Back to [B, embed_dim]
+
+class UpdateLayer(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        mlp_ratio: float,
+        qkv_bias: bool,
+        norm_layer
+    ):
+        super().__init__()
+
+        # Cross attention to previous embedding
+        self.norm1 = norm_layer(embed_dim)
+        self.cross_attn1 = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            bias=qkv_bias,
+            batch_first=True  # Add this parameter
+        )
+
+        # Cross attention to new tokens
+        self.norm2 = norm_layer(embed_dim)
+        self.cross_attn2 = nn.MultiheadAttention(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            bias=qkv_bias,
+            batch_first=True  # Add this parameter
+        )
+
+        # MLP block
+        self.norm3 = norm_layer(embed_dim)
+        mlp_hidden_dim = int(embed_dim * mlp_ratio)
+        self.mlp = Mlp(
+            in_features=embed_dim,
+            hidden_features=mlp_hidden_dim,
+            act_layer=nn.GELU
+        )
+
+    def forward(self, x, prev_embedding, new_tokens):
+        # Apply normalization first
+        query1 = self.norm1(x)
+        key1 = value1 = self.norm1(prev_embedding)
+
+        # First cross attention
+        attn_output1, _ = self.cross_attn1(query1, key1, value1)
+        x = x + attn_output1
+
+        # Second cross attention
+        query2 = self.norm2(x)
+        key2 = value2 = self.norm2(new_tokens)
+
+        attn_output2, _ = self.cross_attn2(query2, key2, value2)
+        x = x + attn_output2
+
+        # MLP
+        x = x + self.mlp(self.norm3(x))
+        return x
