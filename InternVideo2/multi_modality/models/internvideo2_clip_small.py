@@ -47,11 +47,37 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # freeze model
         if self.config.model.freeze_vision:
-            for name, p in self.vision_encoder.super().named_parameters():
-                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
-                    logger.info(f"Unfreeze {name}")
+            logger.info(f"Attempting to freeze parts of the vision encoder (instance of {type(self.vision_encoder)})...")
+
+            # Identify parameters belonging exclusively to the UpdateTransformer
+            update_transformer_param_names = set()
+            if hasattr(self.vision_encoder, 'update_transformer'):
+                for name, _ in self.vision_encoder.update_transformer.named_parameters():
+                    # The names from named_parameters() are relative to update_transformer itself.
+                    # We need the full name relative to self.vision_encoder.
+                    update_transformer_param_names.add(f"update_transformer.{name}")
+                logger.info(f"Found {len(update_transformer_param_names)} parameters belonging to update_transformer. These will NOT be frozen.")
+            else:
+                logger.warning("self.vision_encoder.update_transformer not found. Cannot exclude its params from freezing.")
+
+
+            # Iterate over all parameters in the vision_encoder (WindowInternVideo instance)
+            for name, p in self.vision_encoder.named_parameters():
+                # Condition 1: Check if it's part of the update_transformer
+                if name in update_transformer_param_names:
+                    logger.info(f"Keeping {name} trainable (part of UpdateTransformer).")
+                    # Ensure it's trainable if it was previously frozen for some reason
+                    p.requires_grad = True
+                    continue # Skip to next parameter
+
+                # Condition 2: Your specific unfreezing logic for clip_projector
+                if self.config.model.open_vision_clip_projector and 'clip_projector' in name: # More robust check
+                    logger.info(f"Unfreezing {name} due to open_vision_clip_projector.")
+                    p.requires_grad = True
                 else:
-                    logger.info(f"Freeze {name}")
+                    # This parameter is not part of UpdateTransformer and not the clip_projector (if that's being kept open)
+                    # So, freeze it.
+                    logger.info(f"Freezing {name} (part of base vision model).")
                     p.requires_grad = False
         if self.config.model.freeze_text:
             for name, p in self.text_encoder.named_parameters():
