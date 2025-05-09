@@ -102,6 +102,7 @@ def retrieve_text_window(
     config: dict={},
     device=torch.device('cuda'),
     log:bool = False,
+    return_raw_vision_embeds = False,
 ):
 
     vlm = model
@@ -114,7 +115,7 @@ def retrieve_text_window(
 
     print(f"Frames tensor has shape {frames_tensor.shape}")
 
-    vid_feat = vlm.get_vid_feat(torch.squeeze(frames_tensor, 2), prev_embedding = prev_embedding)
+    vid_feat = vlm.get_vid_feat(torch.squeeze(frames_tensor, 2), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
 
     calculate = False
     for t in texts:
