@@ -169,7 +169,7 @@ def train(
             total_losses = [sum(x.values()) for x in loss_dicts]
 
         for total_loss in total_losses:
-            copied_loss = copy.deepcopy(total_loss)
+            copied_loss = total_loss.clone()
             # --- Backpropagation and Optimization ---
             # Check if using DeepSpeed for optimized distributed training
             if hasattr(config, "deepspeed") and config.deepspeed.enable:
