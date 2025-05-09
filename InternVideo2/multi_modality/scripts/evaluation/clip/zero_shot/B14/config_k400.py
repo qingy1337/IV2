@@ -2,7 +2,7 @@ from configs.data import *
 from configs.model import *
 
 # ========================= data ==========================
-train_corpus = "webvid_debug"
+train_corpus = "webvid_10m"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
 test_file = dict(act_val=available_corpus["webvid_10m"])
 test_types = ["act_val"]
