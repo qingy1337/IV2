@@ -44,8 +44,6 @@ except ImportError:
 
 # --- Re-pasting necessary components from your InternVideo2 code ---
 # (CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed)
-# For brevity, I will assume these classes are defined as you provided them above.
-# Make sure they are accessible in the scope where you define ViTLiteStudent and StreamingInternVideo2Student.
 
 # --- Start of ViT-Lite and Streaming Student Model ---
 
@@ -138,15 +136,17 @@ class ViTLiteStudent(nn.Module):
             # pos_embed_data = get_2d_sincos_pos_embed(self.student_embed_dim, H_grid, cls_token=True)
             # self.pos_embed.data.copy_(torch.from_numpy(pos_embed_data).float().unsqueeze(0))
 
-
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, (nn.LayerNorm, RMSNorm)): # Added RMSNorm
+        elif isinstance(m, nn.LayerNorm): # Handle standard LayerNorm with bias
             if m.bias is not None:
-                 nn.init.constant_(m.bias, 0)
+                    nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, RMSNorm): # Handle RMSNorm (no bias)
+            # RMSNorm does not have a bias attribute
             nn.init.constant_(m.weight, 1.0)
 
     @property
