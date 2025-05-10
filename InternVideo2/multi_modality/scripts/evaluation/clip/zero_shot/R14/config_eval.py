@@ -2,30 +2,28 @@ from configs.data import *
 from configs.model import *
 
 # ========================= data ==========================
-train_corpus = "slim_kinetics"
+train_corpus = "webvid_10m"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
-test_file = dict(act_val=available_corpus["slim_kinetics_act_val"])
+test_file = dict(act_val=available_corpus["webvid_10m"])
 test_types = ["act_val"]
-num_workers = 2
+num_workers = 12
 
 stop_key = None
-
-root_path = "/home/zli"
 
 # ========================= input ==========================
 num_frames = 8
 num_frames_test = 8
-batch_size = 16      # Use 16 for 5090
-batch_size_test = 16 # Use 16 for 5090
+batch_size = 256
+batch_size_test = 64
 max_txt_l = 32
 
 inputs = dict(
     image_res=224,
     video_input=dict(
         num_frames="${num_frames}",
-        sample_type="all",
+        sample_type="rand",
         num_frames_test="${num_frames_test}",
-        sample_type_test="all",
+        sample_type_test="middle",
         random_aug=False,
     ),
     max_txt_l=dict(image="${max_txt_l}", video="${max_txt_l}"),
@@ -65,28 +63,6 @@ model = dict(
         checkpoint_num=0,
         align_dim=512,
     ),
-    streaming_vision_encoder = dict(
-        in_chans = 3,
-        patch_size = 14,
-        img_size = 224,
-        vit_qkv_bias = True,
-        vit_drop_path_rate = 0.05,
-        student_embed_dim = 384,
-        student_depth = 4,
-        student_num_heads = 6,
-        vit_mlp_ratio = 3.0,
-        vit_init_values = None,
-        vit_qk_normalization = False,
-        vit_sep_pos_embed = True,
-        vit_norm_layer_type = 'rmsnorm',
-        rnn_type = 'lstm',
-        rnn_hidden_size = 512,
-        rnn_num_layers = 1,
-        fc_hidden_layers = [256],
-        teacher_clip_embed_dim = 768,
-        student_num_frames_processed_by_vit = 1,
-        student_tubelet_size_for_vit = 1,
-    ),
     text_encoder=dict(
         name="mobileclip_b"
     ),
@@ -96,11 +72,9 @@ model = dict(
     open_vision_clip_projector=True,
     freeze_text=True,
     open_text_projection=False,
-    open_text_lora=False,
-    vision_ckpt_path=f"{root_path}/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
+    vision_ckpt_path="your_model_path/B14_dist_1B_stage2.pth",
     load_vision_ckpt_from_internvideo2_stage2=False,
-    text_ckpt_path=f"{root_path}/IV2/models/mobileclip_blt.pt",
-    extra_ckpt_path=f"{root_path}/IV2/models/clip/B14/pytorch_model.bin"
+    text_ckpt_path="your_model_path/mobileclip_blt.pt",
 )
 
 criterion = dict(
@@ -109,31 +83,19 @@ criterion = dict(
     ),  # 0: disabled.
 )
 
-# optimizer = dict(
-#     opt="adamW",
-#     lr=1e-5,
-#     opt_betas=[0.9, 0.98],  # default
-#     weight_decay=0.2,
-#     max_grad_norm=0.8,  # requires a positive float, use -1 to disable
-#     # use a different lr for some modules, e.g., larger lr for new modules
-#     different_lr=dict(enable=False, module_names=[], lr=1e-5),
-# )
-
-# Use for 5090
 optimizer = dict(
     opt="adamW",
-    lr=1e-5,
+    lr=4e-4,
     opt_betas=[0.9, 0.98],  # default
-    weight_decay=0.01,
-    max_grad_norm=0.7,  # requires a positive float, use -1 to disable
+    weight_decay=0.2,
+    max_grad_norm=-1,  # requires a positive float, use -1 to disable
     # use a different lr for some modules, e.g., larger lr for new modules
-    different_lr=dict(enable=False, module_names=[], lr=1e-5),
+    different_lr=dict(enable=False, module_names=[], lr=1e-3),
 )
 
-# Updated for 5090
-scheduler = dict(sched="cosine", epochs=1, min_lr_multi=0.01, warmup_epochs=0.05)
+scheduler = dict(sched="cosine", epochs=3, min_lr_multi=0.01, warmup_epochs=0.6)
 
-evaluate = False
+evaluate = True
 deep_fusion = False
 evaluation = dict(
     eval_frame_ensemble="concat",  # [concat, max, mean, lse]
@@ -148,27 +110,27 @@ gradient_checkpointing = True
 
 # ========================= wandb ==========================
 wandb = dict(
-    enable=True,
-    entity="qingy2019-conker-mobile-inc-",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
-    project="window_iv2",  # setup in your command line
+    enable=False,
+    entity="likunchang",  # username or team name to store the runs, see https://docs.wandb.ai/ref/python/init
+    project="InternVideo2_CLIP",  # setup in your command line
 )
 dist_url = "env://"
 device = "cuda"
 mode = "pt"
 
 # ========================= others ==========================
-output_dir = './training_outputs_window/'  # output dir
-resume = True  # if True, load optimizer and scheduler states as well
+output_dir = None  # output dir
+resume = False  # if True, load optimizer and scheduler states as well
 debug = False
 log_freq = 1
 seed = 42
 
 save_latest = False
-save_iter = 5000
+save_iter = 500
 auto_resume = True
-pretrained_path = ""  # path to pretrained model weights, for resume only?
+# pretrained_path = ""
 
 deepspeed = dict(
-    enable=True,
-    stage=1,
+    enable=False,
+    stage=0,
 )

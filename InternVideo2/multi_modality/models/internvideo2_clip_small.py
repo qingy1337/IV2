@@ -9,7 +9,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, WindowInternVideo
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, StreamingInternVideo2Student
 from .criterions import VTC_VTM_Loss
 
 logger = logging.getLogger(__name__)
@@ -17,21 +17,34 @@ logger = logging.getLogger(__name__)
 
 class InternVideo2_CLIP_small(nn.Module):
     def __init__(self, config, tokenizer=None, is_pretrain=True):
+        """
+        Initialize the InternVideo2_CLIP_small model.
+
+        Args:
+            config (dict): Configuration dictionary containing model parameters.
+            tokenizer (ClipTokenizer, optional): Tokenizer for text processing. Defaults to None.
+            is_pretrain (bool, optional): Flag indicating if the model is in pretraining mode. Defaults to True.
+        """
         super().__init__()
 
         self.config = config
         self.tokenizer = tokenizer
         self.is_pretrain = is_pretrain
 
-        # create modules.
+        # Load text encoder configuration
         text_encoder_cfg = json.load(
             open(os.path.join(
-                "./models/backbones/internvideo2/mobileclip/configs/" + \
+                "./models/backbones/internvideo2/mobileclip/configs/" +
                 f"{self.config.model.text_encoder.name}.json"))
         )
         if tokenizer is None:
             self.tokenizer = ClipTokenizer(text_encoder_cfg)
+
+        # Build vision and streaming vision encoders
         self.vision_encoder = self.build_vision_encoder()
+        self.streaming_vision_encoder = self.build_streaming_vision_encoder()
+
+        # Define vision alignment layers
         self.vision_align = nn.Sequential(
             nn.LayerNorm(self.config.model.vision_encoder.clip_embed_dim),
             nn.Linear(
@@ -39,46 +52,27 @@ class InternVideo2_CLIP_small(nn.Module):
                 self.config.model.vision_encoder.align_dim
             ),
         )
-        self.text_encoder = self.build_text_encoder(cfg=text_encoder_cfg['text_cfg'], projection_dim=text_encoder_cfg["embed_dim"])
-        # adopt 1 / 100. as in ViCLIP
+
+        # Build text encoder
+        self.text_encoder = self.build_text_encoder(
+            cfg=text_encoder_cfg['text_cfg'],
+            projection_dim=text_encoder_cfg["embed_dim"]
+        )
+
+        # Initialize temperature parameter
         self.temp = nn.parameter.Parameter(torch.ones([]) * config.model.temp)
         self.temp_min = config.model.temp_min
         self.cache_txt = {}
 
-        # freeze model
+        # Freeze model parameters if specified in the config
         if self.config.model.freeze_vision:
-            logger.info(f"Attempting to freeze parts of the vision encoder (instance of {type(self.vision_encoder)})...")
-
-            # Identify parameters belonging exclusively to the UpdateTransformer
-            update_transformer_param_names = set()
-            if hasattr(self.vision_encoder, 'update_transformer'):
-                for name, _ in self.vision_encoder.update_transformer.named_parameters():
-                    # The names from named_parameters() are relative to update_transformer itself.
-                    # We need the full name relative to self.vision_encoder.
-                    update_transformer_param_names.add(f"update_transformer.{name}")
-                logger.info(f"Found {len(update_transformer_param_names)} parameters belonging to update_transformer. These will NOT be frozen.")
-            else:
-                logger.warning("self.vision_encoder.update_transformer not found. Cannot exclude its params from freezing.")
-
-
-            # Iterate over all parameters in the vision_encoder (WindowInternVideo instance)
             for name, p in self.vision_encoder.named_parameters():
-                # Condition 1: Check if it's part of the update_transformer
-                if name in update_transformer_param_names:
-                    logger.info(f"Keeping {name} trainable (part of UpdateTransformer).")
-                    # Ensure it's trainable if it was previously frozen for some reason
-                    p.requires_grad = True
-                    continue # Skip to next parameter
-
-                # Condition 2: Your specific unfreezing logic for clip_projector
-                if self.config.model.open_vision_clip_projector and 'clip_projector' in name: # More robust check
-                    logger.info(f"Unfreezing {name} due to open_vision_clip_projector.")
-                    p.requires_grad = True
+                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
+                    logger.info(f"Unfreeze {name}")
                 else:
-                    # This parameter is not part of UpdateTransformer and not the clip_projector (if that's being kept open)
-                    # So, freeze it.
-                    logger.info(f"Freezing {name} (part of base vision model).")
+                    logger.info(f"Freeze {name}")
                     p.requires_grad = False
+
         if self.config.model.freeze_text:
             for name, p in self.text_encoder.named_parameters():
                 if self.config.model.open_text_projection and name.startswith('projection_layer'):
@@ -87,6 +81,7 @@ class InternVideo2_CLIP_small(nn.Module):
                     logger.info(f"Freeze {name}")
                     p.requires_grad = False
 
+        # Define image transformation pipeline
         img_size = self.config.model.vision_encoder.img_size
         self.transform = transforms.Compose(
             [
@@ -99,13 +94,14 @@ class InternVideo2_CLIP_small(nn.Module):
             ]
         )
 
-        # load pretrained models
+        # Load pretrained models
         self.load_checkpoint(
-            config.model.vision_ckpt_path, config.model.text_ckpt_path,
+            config.model.vision_ckpt_path,
+            config.model.text_ckpt_path,
             config.model.get("extra_ckpt_path", None)
         )
 
-        # criterions
+        # Initialize loss criterion
         self.clip_loss = VTC_VTM_Loss(False)
 
     def no_weight_decay(self):
@@ -220,37 +216,74 @@ class InternVideo2_CLIP_small(nn.Module):
         return tfeat
 
     def build_vision_encoder(self):
-        """build vision encoder
-        Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
-
         """
-        vision_encoder = WindowInternVideo( # Originally just InternVideo2. WindowInternVideo is a wrapper around the InternVideo2 so it should work just fine, except that you have to do forward_full()
-            in_chans=self.config.model.vision_encoder.in_chans,
-            patch_size=self.config.model.vision_encoder.patch_size,
-            img_size=self.config.model.vision_encoder.img_size,
-            qkv_bias=self.config.model.vision_encoder.qkv_bias,
-            drop_path_rate=self.config.model.vision_encoder.drop_path_rate,
-            head_drop_path_rate=self.config.model.vision_encoder.head_drop_path_rate,
-            embed_dim=self.config.model.vision_encoder.embed_dim,
-            num_heads=self.config.model.vision_encoder.num_heads,
-            mlp_ratio=self.config.model.vision_encoder.mlp_ratio,
-            init_values=self.config.model.vision_encoder.init_values,
-            qk_normalization=self.config.model.vision_encoder.qk_normalization,
-            depth=self.config.model.vision_encoder.depth,
+        Build the InternVideo2 model.
+
+        Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
+        """
+
+        config = self.config.model.vision_encoder
+        vision_encoder = InternVideo2(
+            in_chans=config.in_chans,
+            patch_size=config.patch_size,
+            img_size=config.img_size,
+            qkv_bias=config.qkv_bias,
+            drop_path_rate=config.drop_path_rate,
+            head_drop_path_rate=config.head_drop_path_rate,
+            embed_dim=config.embed_dim,
+            num_heads=config.num_heads,
+            mlp_ratio=config.mlp_ratio,
+            init_values=config.init_values,
+            qk_normalization=config.qk_normalization,
+            depth=config.depth,
             use_flash_attn=False, # ENABLE FOR INCREASED PERFORMANCE
             use_fused_rmsnorm=False, # ENABLE FOR INCREASED PERFORMANCE
             use_fused_mlp=False, # ENABLE FOR INCREASED PERFORMANCE
-            fused_mlp_heuristic=self.config.model.vision_encoder.fused_mlp_heuristic,
-            attn_pool_num_heads=self.config.model.vision_encoder.attn_pool_num_heads,
-            clip_embed_dim=self.config.model.vision_encoder.clip_embed_dim,
-            layerscale_no_force_fp32=self.config.model.vision_encoder.layerscale_no_force_fp32,
-            num_frames=self.config.model.vision_encoder.num_frames,
-            tubelet_size=self.config.model.vision_encoder.tubelet_size,
-            sep_pos_embed=self.config.model.vision_encoder.sep_pos_embed,
-            use_checkpoint=self.config.model.vision_encoder.use_checkpoint,
-            checkpoint_num=self.config.model.vision_encoder.checkpoint_num,
+            fused_mlp_heuristic=config.fused_mlp_heuristic,
+            attn_pool_num_heads=config.attn_pool_num_heads,
+            clip_embed_dim=config.clip_embed_dim,
+            layerscale_no_force_fp32=config.layerscale_no_force_fp32,
+            num_frames=config.num_frames,
+            tubelet_size=config.tubelet_size,
+            sep_pos_embed=config.sep_pos_embed,
+            use_checkpoint=config.use_checkpoint,
+            checkpoint_num=config.checkpoint_num,
         )
         return vision_encoder
+
+    def build_streaming_vision_encoder(self):
+        """
+        Build the StreamingInternVideo2Student model.
+
+        Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
+        """
+
+        config = self.config.model.streaming_vision_encoder
+
+        streaming_vision_encoder = StreamingInternVideo2Student(
+            in_chans = config.in_chans,
+            patch_size = config.patch_size,
+            img_size = config.img_size,
+            vit_qkv_bias = config.vit_qkv_bias,
+            vit_drop_path_rate = config.vit_drop_path_rate,
+            student_embed_dim = config.student_embed_dim,
+            student_depth = config.student_depth,
+            student_num_heads = config.student_num_heads,
+            vit_mlp_ratio = config.vit_mlp_ratio,
+            vit_init_values = config.vit_init_values,
+            vit_qk_normalization = config.vit_qk_normalization,
+            vit_sep_pos_embed = config.vit_sep_pos_embed,
+            vit_norm_layer_type = config.vit_norm_layer_type,
+            rnn_type = config.rnn_type,
+            rnn_hidden_size = config.rnn_hidden_size,
+            rnn_num_layers = config.rnn_num_layers,
+            fc_hidden_layers = config.fc_hidden_layers,
+            teacher_clip_embed_dim = config.teacher_clip_embed_dim,
+            student_num_frames_processed_by_vit = config.student_num_frames_processed_by_vit,
+            student_tubelet_size_for_vit = config.student_tubelet_size_for_vit,
+        )
+
+        return streaming_vision_encoder
 
     def build_text_encoder(self, cfg, projection_dim):
         """build text_encoder and possiblly video-to-text multimodal fusion encoder.
