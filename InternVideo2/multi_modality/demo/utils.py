@@ -115,31 +115,32 @@ def retrieve_text_window(
 
     # print(f"Frames tensor has shape {frames_tensor.shape}")
 
-    vid_feat, raw_vision_embeds = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
+    # vid_feat, raw_vision_embeds = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
 
-    calculate = False
-    for t in texts:
-        if t not in tensor_cache:
-            calculate = True
-            break
-    if calculate:
-        text_feat_d = {}
-        text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
-        text_feats = [text_feat_d[t] for t in texts]
-        text_feats_tensor = torch.cat(text_feats, 0)
-        for j in range(len(texts)):
-            tensor_cache[texts[j]] = text_feats_tensor[j]
-    else:
-        if log: print("Using Cached")
-        text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
+    # calculate = False
+    # for t in texts:
+    #     if t not in tensor_cache:
+    #         calculate = True
+    #         break
+    # if calculate:
+    #     text_feat_d = {}
+    #     text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
+    #     text_feats = [text_feat_d[t] for t in texts]
+    #     text_feats_tensor = torch.cat(text_feats, 0)
+    #     for j in range(len(texts)):
+    #         tensor_cache[texts[j]] = text_feats_tensor[j]
+    # else:
+    #     if log: print("Using Cached")
+    #     text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
 
-    # print(f"Video feature is of shape {vid_feat.shape}")
-    # print(f"Text feature is of shape {text_feats_tensor.shape}")
-    probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
+    # # print(f"Video feature is of shape {vid_feat.shape}")
+    # # print(f"Text feature is of shape {text_feats_tensor.shape}")
+    # probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
 
-    ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
+    # ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
 
-    return ret_texts, probs.float().numpy()[0], raw_vision_embeds
+    # return ret_texts, probs.float().numpy()[0], raw_vision_embeds
+    pass
 
 def setup_internvideo2(config: dict):
     if "bert" in config.model.text_encoder.name:
