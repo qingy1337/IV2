@@ -180,7 +180,11 @@ def train(
                 new_frame = image[:, :, new_frame_idx, :, :] # [B, C, H, W]
 
                 # --- Calculate Stream Embedding for the new_frame ---
-                stream_embedding, new_hidden_state = model.streaming_vision_encoder(new_frame, curr_hidden_state)
+                raw_stream_embedding, new_hidden_state = model.streaming_vision_encoder(new_frame, curr_hidden_state)
+
+                aligned_stream_embedding = model_without_ddp.vision_align(raw_stream_embedding)
+
+                stream_embedding = aligned_stream_embedding / aligned_stream_embedding.norm(dim=-1, keepdim=True)
 
                 # --- Calculate Target for the current window ---
                 # The current window starts at (new_frame_idx - MODEL_MAX_FRAMES + 1)
@@ -191,7 +195,15 @@ def train(
                 actual_current_window_frames = image[:, :, current_window_start_idx:current_window_end_idx, :, :]
 
                 with torch.no_grad():
-                    target_embedding = model_without_ddp.vision_encoder(actual_current_window_frames)
+                    # Mirrors inference process
+
+                    raw_target_embedding = model_without_ddp.vision_encoder(actual_current_window_frames)
+
+                    aligned_target_embedding = model_without_ddp.vision_align(raw_target_embedding)
+
+                    target_embedding = aligned_target_embedding / aligned_target_embedding.norm(dim=-1, keepdim=True)
+
+                    # Target embedding is the one used for comparing vs text.
 
                     if log_debug:
                         target_norm = torch.linalg.norm(target_embedding, dim=-1).mean()

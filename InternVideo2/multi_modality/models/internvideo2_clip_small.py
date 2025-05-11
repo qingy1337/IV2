@@ -50,7 +50,16 @@ class InternVideo2_CLIP_small(nn.Module):
             nn.Linear(
                 self.config.model.vision_encoder.clip_embed_dim,
                 self.config.model.vision_encoder.align_dim
-            ),
+            )
+        )
+
+        # Define streaming vision alignment layers
+        self.streaming_vision_align = nn.Sequential(
+            nn.LayerNorm(self.config.model.vision_encoder.clip_embed_dim),
+            nn.Linear(
+                self.config.model.vision_encoder.clip_embed_dim,
+                self.config.model.vision_encoder.align_dim
+            )
         )
 
         # Build text encoder
@@ -72,6 +81,17 @@ class InternVideo2_CLIP_small(nn.Module):
                 else:
                     logger.info(f"Freeze {name}")
                     p.requires_grad = False
+
+            logger.info("---- Froze all the vision encoder params ----")
+
+            for name, p in self.vision_align.named_parameters():
+                if self.config.model.open_vision_clip_projector and name.startswith('clip_projector'):
+                    logger.info(f"Unfreeze {name}")
+                else:
+                    logger.info(f"Freeze {name}")
+                    p.requires_grad = False
+
+            logger.info("---- Froze all the vision align params ----")
 
         if self.config.model.freeze_text:
             for name, p in self.text_encoder.named_parameters():
