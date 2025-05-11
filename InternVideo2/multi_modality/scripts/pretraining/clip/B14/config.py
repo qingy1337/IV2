@@ -130,7 +130,7 @@ evaluation = dict(
     eval_offload=True,  # offload gpu tensors to cpu to save memory.
 )
 
-use_half_precision = False
+use_half_precision = True
 use_bf16 = True
 gradient_checkpointing = True
 
