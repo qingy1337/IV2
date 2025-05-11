@@ -182,7 +182,7 @@ def train(
                 # --- Calculate Stream Embedding for the new_frame ---
                 raw_stream_embedding, new_hidden_state = model.streaming_vision_encoder(new_frame, curr_hidden_state)
 
-                aligned_stream_embedding = model_without_ddp.vision_align(raw_stream_embedding)
+                aligned_stream_embedding = model_without_ddp.streaming_vision_align(raw_stream_embedding)
 
                 stream_embedding = aligned_stream_embedding / aligned_stream_embedding.norm(dim=-1, keepdim=True)
 
