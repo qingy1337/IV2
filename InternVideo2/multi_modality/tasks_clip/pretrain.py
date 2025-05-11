@@ -115,11 +115,9 @@ def train(
 
         B, clip_embed_dim = student_embedding.shape
 
-        # Initialize with 1 x [clip_embed_dim] for similarity matching.
-        target = torch.ones(clip_embed_dim, device=student_embedding.device)
-
-        # Expand the target to [B, clip_embed_dim]
-        target = target.unsqueeze(0).expand(B, -1)  # -1 means keep the dim_size as it is
+        # Initialize the target as a 1D tensor [B] with ones (for similarity)
+        # Ensure it's on the same device as the embeddings
+        target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
 
         # Calculate cosine loss
         # Logs
