@@ -213,7 +213,7 @@ class InternVideo2_CLIP_small(nn.Module):
             - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
         """
         with torch.no_grad():
-            vfeat, new_hidden_state = self.encode_vision(frames)
+            vfeat, new_hidden_state = self.encode_streaming_vision(frames, prev_hidden_state = prev_hidden_state)
 
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
