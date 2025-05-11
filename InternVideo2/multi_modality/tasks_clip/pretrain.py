@@ -325,10 +325,8 @@ def train(
 
 
                 # --- Prepare for next iteration ---
-                # The target embedding of the current window becomes the "previous" embedding for the next update.
-                # Detach to prevent gradients from flowing back multiple steps if not intended,
-                # and it's good practice since it's a target from a no_grad block.
-                pooled_prev_window_embedding = target_pooled_current_window_embedding.clone().detach()
+                # Update the current hidden state
+                curr_hidden_state = new_hidden_state.detach().clone()
 
     # --- Training Loop End ---
 
