@@ -61,15 +61,15 @@ def retrieve_text(
     device=torch.device('cuda'),
     log:bool = False
 ):
-    # print(texts)
     vlm = model
     vlm = vlm.to(device)
-    # print(texts)
+
     fn = config.get('num_frames', 8)
     size_t = config.get('size_t', 224)
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
 
-    print(f"The frames tensor is {frames_tensor.shape} shape")
+    if log: print(f"The frames tensor is {frames_tensor.shape} shape")
+
     vid_feat = vlm.get_vid_feat(frames_tensor)
 
     calculate = False
@@ -94,7 +94,7 @@ def retrieve_text(
 
     return ret_texts, probs.float().numpy()[0]
 
-def retrieve_text_window(
+def retrieve_text_streaming(
     new_frame,
     texts,
     model,
@@ -104,43 +104,81 @@ def retrieve_text_window(
     device=torch.device('cuda'),
     log:bool = False
 ):
+    """
+    Performs text retrieval for a single new video frame in a streaming fashion.
 
+    Processes a single input frame, combines it with previous state (if applicable),
+    computes the video feature, compares it against cached text features, and
+    returns the top matching texts along with the updated hidden state for streaming.
+
+    Args:
+        new_frame: The new video frame (presumably a numpy array).
+        texts (list[str]): A list of text candidates to retrieve against.
+        model: An InternVideo2 instance.
+        prev_hidden_state: The hidden state from the previous frame processing,
+                           needed for the streaming video feature extraction.
+        topk (int): The number of top matching texts to return. Defaults to 5.
+        config (dict): Configuration dictionary. Expected keys: 'size_t' for frame resizing.
+        device (torch.device): The device to perform computation on.
+        log (bool): If True, print logging information.
+
+    Returns:
+        tuple: A tuple containing:
+            - ret_texts (list[str]): The list of topk retrieved texts.
+            - probs (np.ndarray): The confidence scores for the retrieved texts.
+            - new_hidden_state: The updated hidden state after processing the current frame,
+                                to be passed for the next frame.
+    """
     vlm = model
     vlm = vlm.to(device)
 
     size_t = config.get('size_t', 224)
 
-    # new frame is a list with one frame.
+    # New frame is a list with one frame.
+    # frames2tensor processes a list of frames. With a list containing one frame,
+    # frames_tensor will initially have shape [B, T, C, H, W], where B=1, T=1.
     frames_tensor = frames2tensor([new_frame], fnum=1, target_size=(size_t, size_t), device=device)
 
-    # print(f"Frames tensor has shape {frames_tensor.shape}")
+    # Squeeze out the batch and time dimensions, resulting in [C, H, W] or [1, C, H, W]
+    # depending on how get_streaming_vid_feat expects it.
+    # Assuming get_streaming_vid_feat expects [1, C, H, W] for a single frame input.
+    frames_tensor = frames_tensor.squeeze(0) # Shape is now [1, C, H, W]
 
-    # vid_feat, raw_vision_embeds = vlm.get_vid_feat(torch.squeeze(frames_tensor, 0), prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
+    if log: print(f"Frames tensor has shape {frames_tensor.shape}")
 
-    # calculate = False
-    # for t in texts:
-    #     if t not in tensor_cache:
-    #         calculate = True
-    #         break
-    # if calculate:
-    #     text_feat_d = {}
-    #     text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
-    #     text_feats = [text_feat_d[t] for t in texts]
-    #     text_feats_tensor = torch.cat(text_feats, 0)
-    #     for j in range(len(texts)):
-    #         tensor_cache[texts[j]] = text_feats_tensor[j]
-    # else:
-    #     if log: print("Using Cached")
-    #     text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
+    # Get video features for the current frame, utilizing the previous hidden state
+    vid_feat, new_hidden_state = vlm.get_streaming_vid_feat(frames_tensor, prev_hidden_state = prev_hidden_state)
 
-    # # print(f"Video feature is of shape {vid_feat.shape}")
-    # # print(f"Text feature is of shape {text_feats_tensor.shape}")
-    # probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
+    # Check if text features need to be calculated or if cached versions can be used
+    calculate = False
+    for t in texts:
+        if t not in tensor_cache:
+            calculate = True
+            break
+    if calculate:
+        text_feat_d = {}
+        text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
+        text_feats = [text_feat_d[t] for t in texts]
+        text_feats_tensor = torch.cat(text_feats, 0)
+        # Cache calculated text features
+        for j in range(len(texts)):
+            tensor_cache[texts[j]] = text_feats_tensor[j]
+    else:
+        if log: print("Using Cached")
+        # Stack cached text features into a tensor
+        text_feats_tensor = torch.stack([tensor_cache[x] for x in texts])
 
-    # ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
+    # print(f"Video feature is of shape {vid_feat.shape}") # Debug print
+    # print(f"Text feature is of shape {text_feats_tensor.shape}") # Debug print
 
-    # return ret_texts, probs.float().numpy()[0], raw_vision_embeds
-    pass
+    # Predict probabilities and get topk indices by comparing video and text features
+    probs, idxs = vlm.predict_label(vid_feat, text_feats_tensor, top=topk)
+
+    # Map indices back to the original text strings
+    ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
+
+    # Return top texts, their probabilities, and the updated hidden state
+    return ret_texts, probs.float().numpy()[0], new_hidden_state
 
 def setup_internvideo2(config: dict):
     if "bert" in config.model.text_encoder.name:

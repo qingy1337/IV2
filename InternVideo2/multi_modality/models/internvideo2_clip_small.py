@@ -145,16 +145,14 @@ class InternVideo2_CLIP_small(nn.Module):
             loss_vtc=loss_vtc,
         )
 
-    def encode_vision(self, image, test=False):
+    def encode_vision(self, image):
         """encode image / videos as features.
 
         Args:
             image (torch.Tensor): The input images.
-            test (bool): Whether testing.
 
         Returns: tuple.
             - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
-            - (optional) unaligned vision embeds (torch.Tensor): The unaligned vision features.
         """
 
         T = image.shape[1]
@@ -169,12 +167,58 @@ class InternVideo2_CLIP_small(nn.Module):
 
     def get_vid_feat(self, frames: torch.Tensor):
         with torch.no_grad():
-            vfeat = self.encode_vision(frames, test=False)
+            vfeat = self.encode_vision(frames)
 
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
         return vfeat
+
+    def encode_streaming_vision(self, image, prev_hidden_state):
+        """encode image / videos as features using the streaming ViT.
+
+        Args:
+            image (torch.Tensor): The input images.
+            prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
+                For LSTM: (h_prev, c_prev)
+                For GRU: h_prev
+
+        Returns: tuple.
+            - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
+            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+        """
+
+        assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
+
+        vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
+
+        vision_embeds_aligned = self.vision_align(vision_embeds)
+
+        return vision_embeds_aligned, new_hidden_state
+
+    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state):
+        """
+        Processes a single frame (or a small chunk of frames) with the streaming ViT and updates the hidden state.
+
+        Args:
+            frames (torch.Tensor): Input frame(s) for the ViT-Lite.
+                Shape: (B, C, H, W) if student_num_frames_processed_by_vit=1
+                Shape: (B, C, T_chunk, H, W) if student_num_frames_processed_by_vit > 1
+            prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
+                For LSTM: (h_prev, c_prev)
+                For GRU: h_prev
+
+        Returns: tuple.
+            - vfeat (torch.Tensor): The video features.
+            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+        """
+        with torch.no_grad():
+            vfeat, new_hidden_state = self.encode_vision(frames)
+
+            # vfeat = self.vision_proj(vfeat)
+            vfeat /= vfeat.norm(dim=-1, keepdim=True)
+
+        return vfeat, new_hidden_state
 
     def encode_text(self, text):
         """encode text.
