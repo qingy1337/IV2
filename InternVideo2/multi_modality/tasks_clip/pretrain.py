@@ -5,6 +5,7 @@ from os.path import join
 
 import pandas as pd
 import torch
+from torch.nn import CosineEmbeddingLoss
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import wandb
@@ -67,7 +68,7 @@ def train(
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     # Determine the names of the active loss components based on non-zero weights in the config
-    active_loss_names = ["loss_mse"]
+    active_loss_names = ["loss_cosine"]
 
     # Identify the different types of media (e.g., 'image', 'video') present in the training loaders
     media_types = get_media_types(train_loaders)
@@ -103,6 +104,22 @@ def train(
 
     MODEL_MAX_FRAMES = config.num_frames
 
+    # --- Loss function (Cosine embedding loss) ---
+    cosine_loss_base_fn = CosineEmbeddingLoss()
+
+    def cosine_sim_loss(student_embedding, teacher_embedding):
+        # ---------------------------------------
+        # student_embedding | [B, clip_embed_dim]
+        # teacher_embedding | [B, clip_embed_dim]
+        # ---------------------------------------
+
+        # Initialize with 1 x [clip_embed_dim] for similarity matching.
+        target = torch.ones(student_embedding.shape[-1]).long()
+
+        # Calculate cosine loss
+        output = cosine_loss_base_fn(student_embedding, teacher_embedding, target)
+        return output
+
     for i, (media_type, (image, text, idx)) in enumerate(iterator):
         # Move input data to the designated compute device
         image = image.to(device, non_blocking=True) # Use non_blocking for potential speedup with pinned memory
@@ -116,87 +133,72 @@ def train(
 
         # Enable automatic mixed precision context if configured
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
-            # Forward pass: Feed data through the model to get predictions and calculate losses
+            """
+            Outline of training loop:
 
-            # ,-----------------------------------------------------------------.
-            # | Assumption: media_type is video, image is shape [B, T, C, H, W] |
-            # `-----------------------------------------------------------------'
+            1. Run the streaming vision encoder & update the hidden state for the first [1, ..., MODEL_MAX_FRAMES - 1] frames.
+            2. For each of the frames from [MODEL_MAX_FRAMES, ..., 248]:
+                1. Let new_frame be the new frame, new_frame_idx = index of the new frame, 0-indexed.
+                2. Run the streaming vision encoder & store the hidden state for the new_frame. Get the embedding.
+                3. Calculate the vision_encoder (InternVideo2)'s embedding for the frames [new_frame_idx - 7, new_frame_idx + 1).
+                4. Get the CosineEmbeddingLoss and do backprop on that.
+            """
+
+            # > image is shape [B, T, C, H, W]
 
             image = image.permute(0, 2, 1, 3, 4)
 
-            # ,------------------------------------.
-            # | Now image is shape [B, C, T, H, W] |
-            # `------------------------------------'
+            # > image is shape [B, C, T, H, W]
 
-            # Iterate over each frame in the video (time dimension)
             B, C, T, H, W = image.shape
             assert T >= MODEL_MAX_FRAMES, f"Video has {T} frames, needs at least {MODEL_MAX_FRAMES}."
 
-            # Define a pooling function (make sure this aligns with how InternVideo2 gets its final embedding)
-            def pool_embedding_sequence(emb_sequence):
-                # emb_sequence is [B, L, C_embed_dim]
-                if emb_sequence.ndim == 3:
-                    # Example: Mean pooling. If InternVideo2 uses a CLS token, adapt this.
-                    # Or if InternVideo2 has a specific pooling layer (e.g. self.temporal_pool)
-                    # you might want to use that concept if applicable.
-                    return emb_sequence.mean(dim=1) # -> [B, C_embed_dim]
-                elif emb_sequence.ndim == 2: # Already pooled
-                    return emb_sequence
-                else:
-                    raise ValueError(f"Unexpected embedding shape for pooling: {emb_sequence.shape}")
+            # Loop over each of the first MODEL_MAX_FRAMES - 1 frames to get the RNN internal state on track.
 
-            # --- Initial Step ---
-            # Get the embedding for the very first window (frames 0 to MODEL_MAX_FRAMES-1)
-            # This will serve as the "previous_embedding" for the first call to forward_update
-            initial_window_frames = image[:, :, :MODEL_MAX_FRAMES, :, :] # e.g., frames 0..7 if MODEL_MAX_FRAMES=8
-            with torch.no_grad():
-                # Get the unpooled sequence from the base model
-                prev_emb_sequence = model_without_ddp.vision_encoder.forward_full(initial_window_frames)
-                # Pool it to be [B, C_embed_dim]
-                # This pooled embedding is for the window (0 to MODEL_MAX_FRAMES-1)
-                pooled_prev_window_embedding = pool_embedding_sequence(prev_emb_sequence.clone().detach())
+            # This hidden state will be updated throughout the training loop.
+            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
 
-            # Skip the first MODEL_MAX_FRAMES frames
-            for t_new_frame_idx in range(MODEL_MAX_FRAMES, T):
-                new_frame = image[:, :, t_new_frame_idx, :, :]
+            for initial_frame_idx in range(MODEL_MAX_FRAMES - 1):
+                initial_frame = image[:, :, initial_frame_idx, :, :] # [B, C, H, W]
 
-                if log_debug:
-                    logger.info(f"On frame [{t_new_frame_idx-MODEL_MAX_FRAMES}:{t_new_frame_idx}], the previous embedding's shape is {pooled_prev_window_embedding.shape}")
+                stream_embedding, new_hidden_state = model.streaming_vision_encoder(initial_frame, curr_hidden_state)
 
-                predicted_pooled_current_window_embedding = model.vision_encoder.forward_update( # New embedding using the UpdateTransformer
-                    new_frame,
-                    prev_embedding = pooled_prev_window_embedding
-                )
+                curr_hidden_state = new_hidden_state
+
+            # The curr_hidden_state should now be used for the rest of the training loop.
+            # Now, iterate over each of the remaining frames in the video (time dimension)
+            for new_frame_idx in range(MODEL_MAX_FRAMES, T):
+                new_frame = image[:, :, new_frame_idx, :, :] # [B, C, H, W]
+
+                # --- Calculate Stream Embedding for the new_frame ---
+                stream_embedding, new_hidden_state = model.streaming_vision_encoder(new_frame, curr_hidden_state)
 
                 # --- Calculate Target for the current window ---
-                # The current window starts at (t_new_frame_idx - MODEL_MAX_FRAMES + 1)
-                # and ends at t_new_frame_idx (inclusive).
-                current_window_start_idx = t_new_frame_idx - MODEL_MAX_FRAMES + 1
-                current_window_end_idx = t_new_frame_idx + 1 # Slice end index is exclusive
+                # The current window starts at (new_frame_idx - MODEL_MAX_FRAMES + 1)
+                # and ends at new_frame_idx (inclusive).
+                current_window_start_idx = new_frame_idx - MODEL_MAX_FRAMES + 1
+                current_window_end_idx = new_frame_idx + 1 # Slice end index is exclusive
 
                 actual_current_window_frames = image[:, :, current_window_start_idx:current_window_end_idx, :, :]
 
                 with torch.no_grad():
-                    # Get the unpooled sequence for the current window's target
-                    target_emb_sequence_current_window = model_without_ddp.vision_encoder.forward_full(actual_current_window_frames)
-                    # Pool it to get the target [B, C_embed_dim]
-                    target_pooled_current_window_embedding = pool_embedding_sequence(target_emb_sequence_current_window)
+                    target_embedding = model_without_ddp.vision_encoder(actual_current_window_frames)
 
                     if log_debug:
-                        target_norm = torch.linalg.norm(target_pooled_current_window_embedding, dim=-1).mean()
+                        target_norm = torch.linalg.norm(target_embedding, dim=-1).mean()
                         logger.info(f"Target embedding mean L2 norm: {target_norm.item():.4f}")
                         # Optionally, print min/max values
-                        target_min = target_pooled_current_window_embedding.min()
-                        target_max = target_pooled_current_window_embedding.max()
+                        target_min = target_embedding.min()
+                        target_max = target_embedding.max()
                         logger.info(f"Target embedding min: {target_min.item():.4f}, max: {target_max.item():.4f}")
 
                 if log_debug:
-                    logger.info(f"Norm of predicted_pooled_current_window_embedding: {predicted_pooled_current_window_embedding.norm()}")
+                    logger.info(f"Norm of stream_embedding: {stream_embedding.norm()}")
 
                 # --- Calculate Loss ---
                 # Both predicted and target are now [B, C_embed_dim]
-                loss = torch.nn.functional.mse_loss(predicted_pooled_current_window_embedding, target_pooled_current_window_embedding)
-                loss_dict = dict(loss_mse=loss)
+                loss = cosine_sim_loss(stream_embedding, target_embedding)
+                loss_dict = dict(loss_cosine=loss)
                 total_loss = sum(loss_dict.values())
 
                 if log_debug:
@@ -209,40 +211,28 @@ def train(
                     model.step()              # Use DeepSpeed's step method (includes optimizer step, LR schedule)
 
                     if log_debug:
-                        logger.info("BACKWARD SUCCESSFUL!")
+                        logger.info("Loss backward successful!")
                         logger.info(f"2 Total Loss requires grad: {total_loss.requires_grad}")
                 else:
                     # Standard PyTorch / AMP training step
                     # Check if not using float16 AMP or explicitly using bfloat16 (which often doesn't require scaling)
-                    if not config.use_half_precision or config.get('use_bf16', True):
-                        # --- Standard Precision or BFloat16 ---
-                        optimizer.zero_grad() # Reset gradients from previous step
-                        total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
-                        # Apply gradient clipping if specified in the config to prevent exploding gradients
-                        if config.optimizer.max_grad_norm > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                        optimizer.step()      # Update model parameters based on computed gradients
-                        scheduler.step()      # Update learning rate according to the schedule
-                    else:
-                        # --- Float16 Mixed Precision with GradScaler ---
-                        optimizer.zero_grad() # Reset gradients
-                        # Scale the loss before backpropagation to prevent gradient underflow with float16
-                        scaler.scale(total_loss).backward()
-                        # Apply gradient clipping if specified (must unscale gradients first)
-                        if config.optimizer.max_grad_norm > 0:
-                            scaler.unscale_(optimizer) # Unscale gradients before clipping
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                        # scaler.step() first unscales gradients, checks for inf/NaNs, then calls optimizer.step()
-                        scaler.step(optimizer)
-                        # scaler.update() adjusts the scaling factor for the next iteration
-                        scaler.update()
-                        scheduler.step()      # Update learning rate
+                    assert config.get('use_bf16', True), "Only BF16 training supported for simplicity"
+
+                    # --- Loss backward ---
+                    optimizer.zero_grad() # Reset gradients from previous step
+                    total_loss.backward() # Compute gradients of the loss w.r.t. model parameters
+
+                    # Apply gradient clipping if specified in the config to prevent exploding gradients
+                    if config.optimizer.max_grad_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+
+                    optimizer.step()      # Update model parameters based on computed gradients
+                    scheduler.step()      # Update learning rate according to the schedule
 
                 if log_debug:
                     logger.info(f"3 Total Loss requires grad: {total_loss.requires_grad}")
+
                 # --- Logging Metrics ---
-                # Update metric logger with the values of individual loss components for the current batch
-                # loss_dict = {"loss_mse": loss_for_logging}
                 for loss_name in active_loss_names:
                     loss_value = loss_dict[loss_name]
                     # Ensure value is a standard Python number for logging
@@ -262,10 +252,10 @@ def train(
                 # Increment the global step counter
                 global_step += 1
 
-                # Log a Divider
+                # Log a Divider every 100 steps
                 if global_step % 100 == 0:
-                    logger.info(f"+{'─'*50}")
-                    logger.info(f"")
+                    logger.info('─'*80)
+                    logger.info("")
 
                 if log_debug:
                     logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")

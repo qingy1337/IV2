@@ -80,7 +80,7 @@ model = dict(
         vit_sep_pos_embed = True,
         vit_norm_layer_type = 'rmsnorm',
         rnn_type = 'lstm',
-        rnn_hidden_size = 512,
+        rnn_hidden_size = 1024,
         rnn_num_layers = 1,
         fc_hidden_layers = [],
         teacher_clip_embed_dim = 768,
@@ -109,17 +109,6 @@ criterion = dict(
     ),  # 0: disabled.
 )
 
-# optimizer = dict(
-#     opt="adamW",
-#     lr=1e-5,
-#     opt_betas=[0.9, 0.98],  # default
-#     weight_decay=0.2,
-#     max_grad_norm=0.8,  # requires a positive float, use -1 to disable
-#     # use a different lr for some modules, e.g., larger lr for new modules
-#     different_lr=dict(enable=False, module_names=[], lr=1e-5),
-# )
-
-# Use for 5090
 optimizer = dict(
     opt="adamW",
     lr=1e-5,
@@ -130,7 +119,6 @@ optimizer = dict(
     different_lr=dict(enable=False, module_names=[], lr=1e-5),
 )
 
-# Updated for 5090
 scheduler = dict(sched="cosine", epochs=1, min_lr_multi=0.01, warmup_epochs=0.05)
 
 evaluate = False
@@ -142,7 +130,7 @@ evaluation = dict(
     eval_offload=True,  # offload gpu tensors to cpu to save memory.
 )
 
-use_half_precision = True
+use_half_precision = False
 use_bf16 = True
 gradient_checkpointing = True
 
