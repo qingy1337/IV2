@@ -295,6 +295,10 @@ def train(
                 if global_step % 100 == 0:
                     logger.info('─'*80)
                     logger.info("")
+                    logger.info(f"Cosine Similarity     | {cosine_similarity_avg*100:.2f}%")
+                    logger.info(f"Cosine Embedding Loss | {total_loss:.2f}")
+                    logger.info("")
+                    logger.info('─'*80)
 
                 if log_debug:
                     logger.info(f"4 Total Loss requires grad: {total_loss.requires_grad}")
