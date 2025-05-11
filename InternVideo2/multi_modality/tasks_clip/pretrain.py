@@ -117,6 +117,11 @@ def train(
         target = torch.ones(config.model.vision_encoder.clip_embed_dim)
 
         # Calculate cosine loss
+
+        print(f"Student embedding shape is {student_embedding.shape}")
+        print(f"Teacher embedding shape is {teacher_embedding.shape}")
+        print(f"Target embedding shape is {target.shape}")
+
         output = cosine_loss_base_fn(student_embedding, teacher_embedding, target)
         return output
 
