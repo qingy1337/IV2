@@ -113,14 +113,19 @@ def train(
         # teacher_embedding | [B, clip_embed_dim]
         # ---------------------------------------
 
+        B, clip_embed_dim = student_embedding.shape
+
         # Initialize with 1 x [clip_embed_dim] for similarity matching.
-        target = torch.ones(config.model.vision_encoder.clip_embed_dim)
+        target = torch.ones(clip_embed_dim, device=student_embedding.device)
+
+        # Expand the target to [B, clip_embed_dim]
+        target = target.unsqueeze(0).expand(B, -1)  # -1 means keep the dim_size as it is
 
         # Calculate cosine loss
-
-        print(f"Student embedding shape is {student_embedding.shape}")
-        print(f"Teacher embedding shape is {teacher_embedding.shape}")
-        print(f"Target embedding shape is {target.shape}")
+        # Logs
+        # print(f"Student embedding shape is {student_embedding.shape}")
+        # print(f"Teacher embedding shape is {teacher_embedding.shape}")
+        # print(f"Target embedding shape is {target.shape}")
 
         output = cosine_loss_base_fn(student_embedding, teacher_embedding, target)
         return output
