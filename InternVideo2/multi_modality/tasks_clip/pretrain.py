@@ -221,8 +221,10 @@ def train(
                 # --- Calculate Loss ---
                 # Both predicted and target are now [B, C_embed_dim]
                 loss = cosine_sim_loss(stream_embedding, target_embedding)
+
                 loss_dict = dict(loss_cosine=loss, cosine_sim = cosine_similarity)
-                total_loss = sum(loss_dict.values())
+
+                total_loss = loss_dict["loss_cosine"]
 
                 if log_debug:
                     logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
