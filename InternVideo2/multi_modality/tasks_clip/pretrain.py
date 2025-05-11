@@ -69,7 +69,7 @@ def train(
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     # Determine the names of the active loss components based on non-zero weights in the config
-    active_loss_names = ["loss_cosine"]
+    active_loss_names = ["loss_cosine", "cosine_sim"]
 
     # Identify the different types of media (e.g., 'image', 'video') present in the training loaders
     media_types = get_media_types(train_loaders)
@@ -213,13 +213,15 @@ def train(
                         target_max = target_embedding.max()
                         logger.info(f"Target embedding min: {target_min.item():.4f}, max: {target_max.item():.4f}")
 
+                    cosine_similarity = torch.nn.functional.cosine_similarity(stream_embedding, target_embedding, dim=1)
+
                 if log_debug:
                     logger.info(f"Norm of stream_embedding: {stream_embedding.norm()}")
 
                 # --- Calculate Loss ---
                 # Both predicted and target are now [B, C_embed_dim]
                 loss = cosine_sim_loss(stream_embedding, target_embedding)
-                loss_dict = dict(loss_cosine=loss)
+                loss_dict = dict(loss_cosine=loss, cosine_sim = cosine_similarity)
                 total_loss = sum(loss_dict.values())
 
                 if log_debug:
