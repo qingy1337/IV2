@@ -141,7 +141,7 @@ def retrieve_text_streaming(
                  print(f"Shape of element being passed to frames2tensor: {frames_list_for_tensor[0].shape}")
 
 
-    frames_tensor = frames2tensor(frames_list_for_tensor, fnum=1, target_size=(size_t, size_t), device=device, log=log)
+    frames_tensor = frames2tensor(frames_list_for_tensor, fnum=1, target_size=(size_t, size_t), device=device)
 
     if frames_tensor is None: # Handle case where frames2tensor returned None
          if log: print("frames_tensor is None, returning empty results and prev_hidden_state.")
