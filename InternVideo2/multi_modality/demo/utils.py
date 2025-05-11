@@ -70,7 +70,7 @@ def retrieve_text(
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
 
     print(f"The frames tensor is {frames_tensor.shape} shape")
-    vid_feat, raw_vision_embeds = vlm.get_vid_feat(frames_tensor)
+    vid_feat = vlm.get_vid_feat(frames_tensor)
 
     calculate = False
     for t in texts:
@@ -92,18 +92,17 @@ def retrieve_text(
 
     ret_texts = [texts[i] for i in idxs.long().numpy()[0].tolist()]
 
-    return ret_texts, probs.float().numpy()[0], raw_vision_embeds
+    return ret_texts, probs.float().numpy()[0]
 
 def retrieve_text_window(
     new_frame,
     texts,
     model,
-    prev_embedding,
+    prev_hidden_state,
     topk:int=5,
     config: dict={},
     device=torch.device('cuda'),
-    log:bool = False,
-    return_raw_vision_embeds = False,
+    log:bool = False
 ):
 
     vlm = model

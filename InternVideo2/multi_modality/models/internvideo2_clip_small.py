@@ -145,7 +145,7 @@ class InternVideo2_CLIP_small(nn.Module):
             loss_vtc=loss_vtc,
         )
 
-    def encode_vision(self, image, test=False, prev_embedding = None, return_raw_vision_embeds = False):
+    def encode_vision(self, image, test=False):
         """encode image / videos as features.
 
         Args:
@@ -160,27 +160,21 @@ class InternVideo2_CLIP_small(nn.Module):
         T = image.shape[1]
         use_image = True if T == 1 else False
 
-        if prev_embedding is not None:
-            vision_embeds = self.vision_encoder.forward_update(image, prev_embedding = prev_embedding)
-        else:
-            image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
-            vision_embeds = self.vision_encoder(image, use_image=use_image)
+        image = image.permute(0, 2, 1, 3, 4) # [B,T,C,H,W] -> [B,C,T,H,W]
+        vision_embeds = self.vision_encoder(image, use_image=use_image)
 
         vision_embeds_aligned = self.vision_align(vision_embeds)
 
-        if return_raw_vision_embeds:
-            return vision_embeds_aligned, vision_embeds
-
-        return vision_embeds_aligned, None
+        return vision_embeds_aligned
 
     def get_vid_feat(self, frames: torch.Tensor):
         with torch.no_grad():
-            vfeat, raw_vfeat = self.encode_vision(frames, test=False)
+            vfeat = self.encode_vision(frames, test=False)
 
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
-        return vfeat, raw_vfeat
+        return vfeat
 
     def encode_text(self, text):
         """encode text.
