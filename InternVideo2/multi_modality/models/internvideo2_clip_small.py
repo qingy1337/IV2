@@ -173,9 +173,9 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vision_embeds_aligned, None
 
-    def get_vid_feat(self, frames: torch.Tensor, prev_embedding = None, return_raw_vision_embeds = False):
+    def get_vid_feat(self, frames: torch.Tensor):
         with torch.no_grad():
-            vfeat, raw_vfeat = self.encode_vision(frames, test=True, prev_embedding = prev_embedding, return_raw_vision_embeds = return_raw_vision_embeds)
+            vfeat, raw_vfeat = self.encode_vision(frames, test=False)
 
             # vfeat = self.vision_proj(vfeat)
             vfeat /= vfeat.norm(dim=-1, keepdim=True)
