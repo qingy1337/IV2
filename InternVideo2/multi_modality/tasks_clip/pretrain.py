@@ -8,6 +8,7 @@ import torch
 from torch.nn import CosineEmbeddingLoss
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
+from torch.utils.data._utils.collate import default_collate
 import wandb
 from torch.utils.data import ConcatDataset
 
@@ -326,7 +327,7 @@ def train(
 
                 # --- Prepare for next iteration ---
                 # Update the current hidden state
-                curr_hidden_state = new_hidden_state.detach().clone()
+                curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state)
 
     # --- Training Loop End ---
 
@@ -336,9 +337,6 @@ def train(
     logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     # Return the updated global step count
     return global_step
-
-from torch.utils.data._utils.collate import default_collate
-import torch
 
 def clone_collate_fn(batch):
     # Recursively clone every Tensor in the sample so its storage is fresh
