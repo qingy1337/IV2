@@ -69,13 +69,21 @@ def train(
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
     # Determine the names of the active loss components based on non-zero weights in the config
-    active_loss_names = ["loss_cosine", "cosine_sim"]
+    active_loss_names = ["loss_cosine"]
 
     # Identify the different types of media (e.g., 'image', 'video') present in the training loaders
     media_types = get_media_types(train_loaders)
 
     # Add specific meters for each active loss component and each media type
     for loss_name in active_loss_names:
+        for media_type_key in media_types:
+            metric_logger.add_meter(
+                f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}")
+            )
+
+    additional_logs = ["cosine_similarity"]
+
+    for loss_name in additional_logs:
         for media_type_key in media_types:
             metric_logger.add_meter(
                 f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}")
@@ -215,6 +223,8 @@ def train(
 
                     cosine_similarity = torch.nn.functional.cosine_similarity(stream_embedding, target_embedding, dim=1)
 
+                    cosine_similarity_avg = cosine_similarity.mean()
+
                 if log_debug:
                     logger.info(f"Norm of stream_embedding: {stream_embedding.norm()}")
 
@@ -222,9 +232,9 @@ def train(
                 # Both predicted and target are now [B, C_embed_dim]
                 loss = cosine_sim_loss(stream_embedding, target_embedding)
 
-                loss_dict = dict(loss_cosine=loss, cosine_sim = cosine_similarity)
+                loss_dict = dict(loss_cosine=loss)
 
-                total_loss = loss_dict["loss_cosine"]
+                total_loss = sum(loss_dict.values())
 
                 if log_debug:
                     logger.info(f"1 Total Loss requires grad: {total_loss.requires_grad}")
@@ -263,7 +273,11 @@ def train(
                     # Ensure value is a standard Python number for logging
                     loss_value = loss_value if isinstance(loss_value, float) else loss_value.item()
                     metric_logger.update(**{f"{media_type}-{loss_name}": loss_value}) # Log loss per media type
+
+                metric_logger.update(cosine_similarity=cosine_similarity_avg)
+
                 # Update metric logger with the current learning rate and model temperature
+
                 metric_logger.update(lr=optimizer.param_groups[0]["lr"])
                 metric_logger.update(temperature=model_without_ddp.temp.item())
 
