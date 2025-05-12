@@ -212,7 +212,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
 
-        vision_embeds_aligned = self.vision_align(vision_embeds)
+        vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
 
         return vision_embeds_aligned, new_hidden_state
 
