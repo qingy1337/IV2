@@ -155,6 +155,14 @@ seed = 42
 
 save_latest = False
 save_iter = 5000
+eval_freq_steps = 1000
+
+# Evaluation video
+eval_repo_id = "qingy2024/backflip_train"
+filename = "1.mp4"
+
+eval_plot_output_dir = 'scripts/pretraining/clip/B14/cosine_sim_graphs'
+
 auto_resume = True
 pretrained_path = ""  # path to pretrained model weights, for resume only?
 
@@ -162,3 +170,5 @@ deepspeed = dict(
     enable=True,
     stage=1,
 )
+
+# hf_hub_download(repo_id="google/fleurs", filename="fleurs.py", repo_type="dataset")
