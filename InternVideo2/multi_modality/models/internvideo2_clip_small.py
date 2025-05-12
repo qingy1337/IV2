@@ -109,7 +109,8 @@ class InternVideo2_CLIP_small(nn.Module):
                     (img_size, img_size),
                     interpolation=InterpolationMode.BICUBIC,
                 ),
-                transforms.Lambda(lambda x: x.float().div(255.0)),
+                transforms.ToTensor(),
+                # transforms.Lambda(lambda x: x.float().div(255.0)),
                 transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
             ]
         )
