@@ -12,6 +12,7 @@ import pickle
 import torch.distributed as dist
 from torch.utils.data._utils.collate import default_collate
 from huggingface_hub import hf_hub_download
+from torchvision import transforms
 import wandb
 from torch.utils.data import ConcatDataset
 
