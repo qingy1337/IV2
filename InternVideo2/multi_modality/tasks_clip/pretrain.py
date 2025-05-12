@@ -559,7 +559,7 @@ def train(
                 # --- Periodic Evaluation ---
                 # Perform evaluation every EVAL_FREQ_STEPS global steps
                 # Check if it's the main process to avoid redundant evaluations in DDP
-                if is_main_process() and global_step > 0 and global_step % EVAL_FREQ_STEPS == 0:
+                if global_step % EVAL_FREQ_STEPS == 0:
                      logger.info(f"Performing periodic evaluation at global step {global_step}...")
                      # Call the evaluation function
                      avg_sim = evaluate_streaming_similarity(
