@@ -5,8 +5,10 @@ from os.path import join
 
 import pandas as pd
 import torch
+import os
 from torch.nn import CosineEmbeddingLoss
 import torch.backends.cudnn as cudnn
+import pickle
 import torch.distributed as dist
 from torch.utils.data._utils.collate import default_collate
 import wandb
@@ -24,6 +26,49 @@ from utils.distributed import get_rank, is_main_process
 from utils.logger import log_dict_to_wandb, setup_wandb
 
 logger = logging.getLogger(__name__)
+
+def save_debug_step_data(output_dir, global_step, frame_idx,
+                         new_frame_input, # Input to streaming_vision_encoder
+                         current_hidden_state_input, # Hidden state input to streaming_vision_encoder
+                         actual_window_input, # Input to vision_encoder (full model)
+                         stream_embedding_output, # Output of streaming pipeline
+                         target_embedding_output, # Output of target pipeline
+                         model_state_dict,
+                         config=None): # Optional: save config for completeness
+    """
+    Saves all relevant tensors and model state for a single debug step.
+    """
+    step_dir = os.path.join(output_dir, f"debug_step_{global_step}_frame_{frame_idx}")
+    os.makedirs(step_dir, exist_ok=True)
+
+    # Save tensors
+    torch.save(new_frame_input.cpu(), os.path.join(step_dir, "new_frame_input.pt"))
+    torch.save(actual_window_input.cpu(), os.path.join(step_dir, "actual_window_input.pt"))
+    torch.save(stream_embedding_output.cpu(), os.path.join(step_dir, "stream_embedding_output.pt"))
+    torch.save(target_embedding_output.cpu(), os.path.join(step_dir, "target_embedding_output.pt"))
+
+    # Save hidden state (can be a tuple of tensors)
+    # Ensure hidden state tensors are also moved to CPU before saving if they are on GPU
+    if isinstance(current_hidden_state_input, tuple):
+        cpu_hidden_state = tuple(h.cpu() for h in current_hidden_state_input)
+    elif isinstance(current_hidden_state_input, torch.Tensor):
+        cpu_hidden_state = current_hidden_state_input.cpu()
+    else:
+        cpu_hidden_state = current_hidden_state_input # Or raise error if unexpected type
+
+    with open(os.path.join(step_dir, "current_hidden_state_input.pkl"), "wb") as f:
+        pickle.dump(cpu_hidden_state, f)
+
+    # Save model state dict
+    torch.save(model_state_dict, os.path.join(step_dir, "model_state_dict.pth"))
+
+    # Save config (optional)
+    if config:
+        with open(os.path.join(step_dir, "config.pkl"), "wb") as f:
+            pickle.dump(config, f)
+
+    print(f"Saved debug data for global_step {global_step}, frame_idx {frame_idx} to {step_dir}")
+
 
 def train(
     model,                # The neural network model being trained
@@ -231,6 +276,20 @@ def train(
                 # --- Calculate Loss ---
                 # Both predicted and target are now [B, C_embed_dim]
                 loss = cosine_sim_loss(stream_embedding, target_embedding)
+
+                save_debug_step_data(
+                    output_dir = './training_outputs',
+                    global_step = global_step,
+                    frame_idx = new_frame_idx,
+                    new_frame_input = new_frame,
+                    current_hidden_state_input = curr_hidden_state,
+                    actual_window_input = actual_current_window_frames,
+                    stream_embedding_output = stream_embedding,
+                    target_embedding_output = target_embedding,
+                    model_state_dict = model_without_ddp.state_dict()
+                )
+
+                logger.info("==== Saved Debug Step Data to ./training_outputs/ ====")
 
                 loss_dict = dict(loss_cosine=loss)
 
