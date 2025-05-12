@@ -103,7 +103,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # Define image transformation pipeline
         img_size = self.config.model.vision_encoder.img_size
-        self.transform = transforms.Compose(
+        self.inference_transform = transforms.Compose(
             [
                 transforms.Resize(
                     (img_size, img_size),
@@ -111,6 +111,17 @@ class InternVideo2_CLIP_small(nn.Module):
                 ),
                 transforms.ToTensor(),
                 # transforms.Lambda(lambda x: x.float().div(255.0)),
+                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ]
+        )
+
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    (img_size, img_size),
+                    interpolation=InterpolationMode.BICUBIC,
+                ),
+                transforms.Lambda(lambda x: x.float().div(255.0)),
                 transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
             ]
         )
