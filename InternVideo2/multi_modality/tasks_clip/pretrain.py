@@ -208,7 +208,7 @@ def evaluate_streaming_similarity(
 
             # Align and Normalize the raw streaming embedding
             aligned_stream_embedding = model.streaming_vision_align(raw_stream_embedding)
-            stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-8)
+            stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
             # Update the hidden state for the next frame
             curr_hidden_state_streaming = new_hidden_state
@@ -232,7 +232,7 @@ def evaluate_streaming_similarity(
 
             # Align and Normalize the raw target embedding
             aligned_target_embedding = model.vision_align(raw_target_embedding)
-            target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-8)
+            target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
             # --- Cosine Similarity ---
             similarity = torch.nn.functional.cosine_similarity(stream_embedding, target_embedding, dim=1)
@@ -443,7 +443,7 @@ def train(
 
                 # Align and Normalize
                 aligned_stream_embedding = model_without_ddp.streaming_vision_align(raw_stream_embedding)
-                stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-8)
+                stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # --- Calculate Target Embedding for the current window ---
                 # The current window ends at new_frame_idx
@@ -460,7 +460,7 @@ def train(
 
                     # Align and Normalize
                     aligned_target_embedding = model_without_ddp.vision_align(raw_target_embedding)
-                    target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-8)
+                    target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
                     # Calculate cosine similarity for logging (detached)
                     cosine_similarity = torch.nn.functional.cosine_similarity(stream_embedding.detach(), target_embedding.detach(), dim=1)
