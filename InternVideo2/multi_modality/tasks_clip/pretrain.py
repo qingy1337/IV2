@@ -603,7 +603,7 @@ def train(
                          logger.info(f"Temperature                | {model_without_ddp.temp.item():.4f}")
                     # If evaluation just happened, log that as well
                     if global_step > 0 and global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
-                        logger.info(f"Evaluation Average Sim     | {metric_logger.meters['eval_avg_sim'].global_avg:.4f}")
+                        logger.info(f"Evaluation Average Sim     | {metric_logger.meters['eval_avg_sim']:.4f}")
                     logger.info('─'*80)
 
 
