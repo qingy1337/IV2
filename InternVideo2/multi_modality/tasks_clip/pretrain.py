@@ -326,9 +326,9 @@ def train(
     EVAL_FREQ_STEPS = config.eval_freq_steps
     # Define the specific video path for evaluation
 
-    logger.info(f"Getting evaluation video from {config.eval_video__repo_id} ({config.eval_video_filename})")
+    logger.info(f"Getting evaluation video from {config.eval_video_repo_id} ({config.eval_video_filename})")
 
-    EVAL_VIDEO_PATH = hf_hub_download(repo_id=config.eval_video__repo_id, filename=config.eval_video_filename, repo_type="dataset")
+    EVAL_VIDEO_PATH = hf_hub_download(repo_id=config.eval_video_repo_id, filename=config.eval_video_filename, repo_type="dataset")
     # Define the output directory for evaluation plots
     EVAL_PLOT_OUTPUT_DIR = config.eval_plot_output_dir
 

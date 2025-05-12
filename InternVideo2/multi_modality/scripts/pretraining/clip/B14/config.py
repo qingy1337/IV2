@@ -158,8 +158,8 @@ save_iter = 5000
 eval_freq_steps = 1000
 
 # Evaluation video
-eval_repo_id = "qingy2024/backflip_train"
-filename = "1.mp4"
+eval_video_repo_id = "qingy2024/backflip_train"
+eval_video_filename = "1.mp4"
 
 eval_plot_output_dir = 'scripts/pretraining/clip/B14/cosine_sim_graphs'
 
