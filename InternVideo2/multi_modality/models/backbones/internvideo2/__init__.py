@@ -3,4 +3,4 @@ from .internvideo2 import pretrain_internvideo2_1b_patch14_224, pretrain_internv
 from .internvideo2_clip_vision import InternVideo2
 from .internvideo2_clip_recycle import StreamingInternVideo2Student
 from .internvideo2_clip_text import LLaMA, Tokenizer
-from .mobileclip import TextTransformer, ClipTokenizer
+from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16

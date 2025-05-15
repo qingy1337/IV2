@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import timm
 
 import torch
 from torch import nn
@@ -9,8 +10,9 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, StreamingInternVideo2Student
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer
 from .criterions import VTC_VTM_Loss
+from .utils import unwrap_state_dict
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +33,17 @@ class InternVideo2_CLIP_small(nn.Module):
         self.tokenizer = tokenizer
         self.is_pretrain = is_pretrain
 
-        # Load text encoder configuration
-        text_encoder_cfg = json.load(
+        # Load MobileCLIP encoder configuration
+        mobileclip_cfg = json.load(
             open(os.path.join(
                 "./models/backbones/internvideo2/mobileclip/configs/" +
-                f"{self.config.model.text_encoder.name}.json"))
+                f"{self.config.model.mobileclip_type.name}.json"))
         )
         if tokenizer is None:
-            self.tokenizer = ClipTokenizer(text_encoder_cfg)
+            self.tokenizer = ClipTokenizer(mobileclip_cfg)
 
-        # Build vision and streaming vision encoders
+        # Build vision encoder
         self.vision_encoder = self.build_vision_encoder()
-        self.streaming_vision_encoder = self.build_streaming_vision_encoder()
 
         # Define vision alignment layers
         self.vision_align = nn.Sequential(
@@ -53,19 +54,15 @@ class InternVideo2_CLIP_small(nn.Module):
             )
         )
 
-        # Define streaming vision alignment layers
-        self.streaming_vision_align = nn.Sequential(
-            nn.LayerNorm(self.config.model.vision_encoder.clip_embed_dim),
-            nn.Linear(
-                self.config.model.vision_encoder.clip_embed_dim,
-                self.config.model.vision_encoder.align_dim
-            )
+        # Build MobileCLIP vision encoder
+        self.single_vision_encoder = self.build_single_vision_encoder(
+            projection_dim=mobileclip_cfg["embed_dim"]
         )
 
         # Build text encoder
         self.text_encoder = self.build_text_encoder(
-            cfg=text_encoder_cfg['text_cfg'],
-            projection_dim=text_encoder_cfg["embed_dim"]
+            cfg=mobileclip_cfg['text_cfg'],
+            projection_dim=mobileclip_cfg["embed_dim"]
         )
 
         # Initialize temperature parameter
@@ -93,7 +90,14 @@ class InternVideo2_CLIP_small(nn.Module):
 
             logger.info("---- Froze all the vision align params ----")
 
-        if self.config.model.freeze_text:
+        if self.config.model.freeze_mobileclip_vision:
+            for name, p in self.single_vision_encoder.named_parameters():
+                logger.info(f"Freeze {name}")
+                p.requires_grad = False
+
+                logger.info("---- Froze all the single vision encoder params ----")
+
+        if self.config.model.freeze_mobileclip_text:
             for name, p in self.text_encoder.named_parameters():
                 if self.config.model.open_text_projection and name.startswith('projection_layer'):
                     logger.info(f"Unfreeze {name}")
@@ -103,18 +107,6 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # Define image transformation pipeline
         img_size = self.config.model.vision_encoder.img_size
-        self.inference_transform = transforms.Compose(
-            [
-                transforms.Resize(
-                    (img_size, img_size),
-                    interpolation=InterpolationMode.BICUBIC,
-                ),
-                transforms.ToTensor(),
-                # transforms.Lambda(lambda x: x.float().div(255.0)),
-                transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-            ]
-        )
-
         self.transform = transforms.Compose(
             [
                 transforms.Resize(
@@ -128,9 +120,9 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # Load pretrained models
         self.load_checkpoint(
-            config.model.vision_ckpt_path,
-            config.model.text_ckpt_path,
-            config.model.get("extra_ckpt_path", None)
+            vision_ckpt_path=config.model.vision_ckpt_path,
+            mobileclip_ckpt_path=config.model.mobileclip_ckpt_path,
+            extra_ckpt_path=config.model.get("extra_ckpt_path", None)
         )
 
         # Initialize loss criterion
@@ -206,51 +198,51 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vfeat
 
-    def encode_streaming_vision(self, image, prev_hidden_state):
-        """encode image / videos as features using the streaming ViT.
+    # def encode_streaming_vision(self, image, prev_hidden_state):
+    #     """encode image / videos as features using the streaming ViT.
 
-        Args:
-            image (torch.Tensor): The input images.
-            prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
-                For LSTM: (h_prev, c_prev)
-                For GRU: h_prev
+    #     Args:
+    #         image (torch.Tensor): The input images.
+    #         prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
+    #             For LSTM: (h_prev, c_prev)
+    #             For GRU: h_prev
 
-        Returns: tuple.
-            - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
-            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
-        """
+    #     Returns: tuple.
+    #         - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
+    #         - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+    #     """
 
-        assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
+    #     assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
 
-        vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
+    #     vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
 
-        vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
+    #     vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
 
-        return vision_embeds_aligned, new_hidden_state
+    #     return vision_embeds_aligned, new_hidden_state
 
-    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state):
-        """
-        Processes a single frame (or a small chunk of frames) with the streaming ViT and updates the hidden state.
+    # def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state):
+    #     """
+    #     Processes a single frame (or a small chunk of frames) with the streaming ViT and updates the hidden state.
 
-        Args:
-            frames (torch.Tensor): Input frame(s) for the ViT-Lite.
-                Shape: (B, C, H, W) if student_num_frames_processed_by_vit=1
-                Shape: (B, C, T_chunk, H, W) if student_num_frames_processed_by_vit > 1
-            prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
-                For LSTM: (h_prev, c_prev)
-                For GRU: h_prev
+    #     Args:
+    #         frames (torch.Tensor): Input frame(s) for the ViT-Lite.
+    #             Shape: (B, C, H, W) if student_num_frames_processed_by_vit=1
+    #             Shape: (B, C, T_chunk, H, W) if student_num_frames_processed_by_vit > 1
+    #         prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
+    #             For LSTM: (h_prev, c_prev)
+    #             For GRU: h_prev
 
-        Returns: tuple.
-            - vfeat (torch.Tensor): The video features.
-            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
-        """
-        with torch.no_grad():
-            vfeat, new_hidden_state = self.encode_streaming_vision(frames, prev_hidden_state = prev_hidden_state)
+    #     Returns: tuple.
+    #         - vfeat (torch.Tensor): The video features.
+    #         - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+    #     """
+    #     with torch.no_grad():
+    #         vfeat, new_hidden_state = self.encode_streaming_vision(frames, prev_hidden_state = prev_hidden_state)
 
-            # vfeat = self.vision_proj(vfeat)
-            vfeat /= vfeat.norm(dim=-1, keepdim=True)
+    #         # vfeat = self.vision_proj(vfeat)
+    #         vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
-        return vfeat, new_hidden_state
+    #     return vfeat, new_hidden_state
 
     def encode_text(self, text):
         """encode text.
@@ -321,42 +313,8 @@ class InternVideo2_CLIP_small(nn.Module):
         )
         return vision_encoder
 
-    def build_streaming_vision_encoder(self):
-        """
-        Build the StreamingInternVideo2Student model.
-
-        Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
-        """
-
-        config = self.config.model.streaming_vision_encoder
-
-        streaming_vision_encoder = StreamingInternVideo2Student(
-            in_chans = config.in_chans,
-            patch_size = config.patch_size,
-            img_size = config.img_size,
-            vit_qkv_bias = config.vit_qkv_bias,
-            vit_drop_path_rate = config.vit_drop_path_rate,
-            student_embed_dim = config.student_embed_dim,
-            student_depth = config.student_depth,
-            student_num_heads = config.student_num_heads,
-            vit_mlp_ratio = config.vit_mlp_ratio,
-            vit_init_values = config.vit_init_values,
-            vit_qk_normalization = config.vit_qk_normalization,
-            vit_sep_pos_embed = config.vit_sep_pos_embed,
-            vit_norm_layer_type = config.vit_norm_layer_type,
-            rnn_type = config.rnn_type,
-            rnn_hidden_size = config.rnn_hidden_size,
-            rnn_num_layers = config.rnn_num_layers,
-            fc_hidden_layers = config.fc_hidden_layers,
-            teacher_clip_embed_dim = config.teacher_clip_embed_dim,
-            student_num_frames_processed_by_vit = config.student_num_frames_processed_by_vit,
-            student_tubelet_size_for_vit = config.student_tubelet_size_for_vit,
-        )
-
-        return streaming_vision_encoder
-
     def build_text_encoder(self, cfg, projection_dim):
-        """build text_encoder and possiblly video-to-text multimodal fusion encoder.
+        """Build the text encoder from MobileCLIP.
         Returns: nn.Module. The text encoder
 
         """
@@ -364,19 +322,25 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return text_encoder
 
-    def load_checkpoint(self, vision_ckpt_path=None, text_ckpt_path=None, extra_ckpt_path=None):
+    def build_single_vision_encoder(self, projection_dim):
+        """Build the vision transformer from MobileCLIP.
+        Returns: nn.Module. The vision encoder
+
+        """
+        single_vision_encoder = timm.create_model("vit_b16", projection_dim = projection_dim)
+
+        return single_vision_encoder
+
+    def load_checkpoint(self, vision_ckpt_path=None, mobileclip_ckpt_path=None, extra_ckpt_path=None):
         assert vision_ckpt_path is not None, "No vision_encoder checkpoint"
-        assert text_ckpt_path is not None, "No text_encoder checkpoint"
+        assert mobileclip_ckpt_path is not None, "No mobileclip checkpoint (for text_encoder and single_vision_encoder)"
 
         new_ckpt = {}
 
-        # load vision_encoder
+        # load vision_encoder (InternVideo2 part)
         logger.info(f"Load vision_encoder checkpoint from {vision_ckpt_path}")
-        vision_ckpt = torch.load(vision_ckpt_path, map_location='cpu')
-        if 'module' in vision_ckpt.keys():
-            vision_ckpt = vision_ckpt['module']
-        elif 'model' in vision_ckpt.keys():
-            vision_ckpt = vision_ckpt['model']
+        vision_ckpt = unwrap_state_dict(torch.load(vision_ckpt_path, map_location='cpu'))
+
         if self.config.model.get('load_vision_ckpt_from_internvideo2_stage2', False):
             from .backbones.internvideo2.pos_embed import interpolate_pos_embed
             orig_t_size = self.config.model.get('vision_ckpt_t_size', 4)
@@ -393,30 +357,34 @@ class InternVideo2_CLIP_small(nn.Module):
                     continue
         else:
             for k, v in vision_ckpt.items():
+                # These keys are from the InternVideo2 checkpoint structure
                 if k.startswith('clip_decoder.') or k.startswith('mae_decoder.') or k.startswith('final_clip_decoder.'):
                     continue
                 elif k in ['clip_pos_embed', 'mae_pos_embed']:
                     continue
                 else:
+                    # Prefix with 'vision_encoder.' for the InternVideo2 part
                     new_k = 'vision_encoder.' + k
                     new_ckpt[new_k] = v
 
-        # load text_encoder
-        logger.info(f"Load text_encoder checkpoint from {text_ckpt_path}")
-        test_ckpt = torch.load(text_ckpt_path, map_location='cpu')
-        if 'module' in test_ckpt.keys():
-            test_ckpt = test_ckpt['module']
-        for k, v in test_ckpt.items():
+        # load text_encoder and single_vision_encoder (MobileCLIP parts)
+        logger.info(f"Load mobileclip checkpoint from {mobileclip_ckpt_path}")
+        mobileclip_ckpt = unwrap_state_dict(torch.load(mobileclip_ckpt_path, map_location='cpu'))
+
+        for k, v in mobileclip_ckpt.items():
             if k.startswith('text_encoder.'):
                 new_ckpt[k] = v
+            elif k.startswith('vision_encoder.'):
+                # Map MobileCLIP's vision_encoder keys to the single_vision_encoder module
+                new_k = 'single_vision_encoder.' + k[len('vision_encoder.'):]
+                new_ckpt[new_k] = v
 
         # load extra checkpoint
         # often when post-pretrain after previous pretraining, thus the keys are same
         if extra_ckpt_path is not None:
             logger.info(f"Load extra checkpoint from {extra_ckpt_path}")
-            extra_ckpt = torch.load(extra_ckpt_path, map_location='cpu')
-            if 'module' in extra_ckpt.keys():
-                extra_ckpt = extra_ckpt['module']
+            extra_ckpt = unwrap_state_dict(torch.load(extra_ckpt_path, map_location='cpu'))
+
             for k, v in extra_ckpt.items():
                 new_ckpt[k] = v
 

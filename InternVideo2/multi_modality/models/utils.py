@@ -297,3 +297,13 @@ def tie_encoder_decoder_weights(
         decoder, encoder, base_model_prefix, uninitialized_encoder_weights, skip_key
     )
 
+
+def unwrap_state_dict(state_dict):
+    """
+    Unwrap state_dict if it's wrapped inside 'module' or 'model' keys.
+    """
+    if 'module' in state_dict.keys():
+        state_dict = state_dict['module']
+    elif 'model' in state_dict.keys():
+        state_dict = state_dict['model']
+    return state_dict

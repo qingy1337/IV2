@@ -67,41 +67,20 @@ model = dict(
         checkpoint_num=0,
         align_dim=512,
     ),
-    streaming_vision_encoder = dict(
-        in_chans = 3,
-        patch_size = 14,
-        img_size = size_t,
-        vit_qkv_bias = True,
-        vit_drop_path_rate = 0.05,
-        student_embed_dim = 384,
-        student_depth = 4,
-        student_num_heads = 6,
-        vit_mlp_ratio = 3.0,
-        vit_init_values = None,
-        vit_qk_normalization = False,
-        vit_sep_pos_embed = True,
-        vit_norm_layer_type = 'rmsnorm',
-        rnn_type = 'lstm',
-        rnn_hidden_size = 1024,
-        rnn_num_layers = 3,
-        fc_hidden_layers = [512],
-        teacher_clip_embed_dim = 768,
-        student_num_frames_processed_by_vit = 1,
-        student_tubelet_size_for_vit = 1,
-    ),
-    text_encoder=dict(
+    mobileclip_type=dict(
         name="mobileclip_b"
     ),
     temp=1 / 100.0,
     temp_min=1 / 100.0,
     freeze_vision=True,
+    freeze_mobileclip_vision=True, # Freeze the MobileCLIP vision encoder
     open_vision_clip_projector=False,
-    freeze_text=True,
+    freeze_mobileclip_text=True,
     open_text_projection=False,
     open_text_lora=False,
     vision_ckpt_path=f"{root_path}/IV2/models/stage1/B14/B14_dist_1B_stage2/pytorch_model.bin",
     load_vision_ckpt_from_internvideo2_stage2=False,
-    text_ckpt_path=f"{root_path}/IV2/models/mobileclip_blt.pt",
+    mobileclip_ckpt_path=f"{root_path}/IV2/models/mobileclip_blt.pt",
     extra_ckpt_path=f"{root_path}/IV2/models/clip/B14/pytorch_model.bin"
 )
 
