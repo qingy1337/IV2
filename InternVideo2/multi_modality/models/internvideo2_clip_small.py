@@ -373,6 +373,7 @@ class InternVideo2_CLIP_small(nn.Module):
 
         for k, v in mobileclip_ckpt.items():
             if k.startswith('text_encoder.'):
+                print(f"    - Loading parameter {k} for the MobileCLIP text encoder.")
                 new_ckpt[k] = v
             elif k.startswith('vision_encoder.'):
                 print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
