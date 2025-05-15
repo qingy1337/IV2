@@ -373,12 +373,12 @@ class InternVideo2_CLIP_small(nn.Module):
 
         for k, v in mobileclip_ckpt.items():
             if k.startswith('text_encoder.'):
-                print(f"    - Loading parameter {k} for the MobileCLIP text encoder.")
+                # print(f"    - Loading parameter {k} for the MobileCLIP text encoder.")
                 new_ckpt[k] = v
-            elif k.startswith('vision_encoder.'):
-                print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
-                # Map MobileCLIP's vision_encoder keys to the single_vision_encoder module
-                new_k = 'single_vision_encoder.' + k[len('vision_encoder.'):]
+            elif k.startswith('image_encoder.'):
+                # print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
+                # Map MobileCLIP's image_encoder keys to the single_vision_encoder module
+                new_k = 'single_vision_encoder.' + k[len('image_encoder.'):]
                 new_ckpt[new_k] = v
 
         # load extra checkpoint
