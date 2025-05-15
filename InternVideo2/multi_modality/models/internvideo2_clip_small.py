@@ -375,6 +375,7 @@ class InternVideo2_CLIP_small(nn.Module):
             if k.startswith('text_encoder.'):
                 new_ckpt[k] = v
             elif k.startswith('vision_encoder.'):
+                print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
                 # Map MobileCLIP's vision_encoder keys to the single_vision_encoder module
                 new_k = 'single_vision_encoder.' + k[len('vision_encoder.'):]
                 new_ckpt[new_k] = v
