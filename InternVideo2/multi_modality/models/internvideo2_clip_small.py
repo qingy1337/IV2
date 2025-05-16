@@ -89,11 +89,11 @@ class InternVideo2_CLIP_small(nn.Module):
             logger.info("---- Froze all the vision align params ----")
 
         if self.config.model.freeze_mobileclip_vision:
-            for name, p in self.single_vision_encoder.named_parameters():
+            for name, p in self.streaming_vision_encoder.vit_lite.named_parameters():
                 logger.info(f"Freeze {name}")
                 p.requires_grad = False
 
-                logger.info("---- Froze all the single vision encoder params ----")
+            logger.info("---- Froze all the MobileCLIP vision encoder params ----")
 
         if self.config.model.freeze_mobileclip_text:
             for name, p in self.text_encoder.named_parameters():
