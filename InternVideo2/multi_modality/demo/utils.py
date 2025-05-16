@@ -478,3 +478,56 @@ class InternVideo2_Stage2(nn.Module):
         label_probs = (100.0 * vid_feat @ txt_feat.T)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
+
+def print_config(config):
+    """Prints a formatted table of the model configuration parameters.
+
+    Args:
+        config (dict): A dictionary containing the model configuration.
+                       It is expected to have a 'model' key, which itself is a
+                       dictionary with various configuration parameters.
+
+    Returns:
+        None: This function prints to the console and does not return a value.
+    """
+    try:
+        from tabulate import tabulate
+    except ImportError:
+        print("Please install the 'tabulate' package to print the configuration table.")
+        return
+    model_config = config.model
+    vision_config = model_config.get('vision_encoder', {}) # Safely get vision_encoder dict
+
+    table_data = [
+        ["Parameter", "Value"],
+        ["--- General Model ---", "---"],
+        ["Model Class", model_config.get('model_cls', 'N/A')],
+        ["Main Checkpoint", os.path.basename(model_config.get('extra_ckpt_path', 'N/A')) if model_config.get('extra_ckpt_path') else 'N/A'],
+        ["Temperature", model_config.get('temp', 'N/A')],
+        ["--- Vision Encoder ---", "---"],
+        ["VE Name", vision_config.get('name', 'N/A')],
+        ["VE Image Size", vision_config.get('img_size', 'N/A')],
+        ["VE Patch Size", vision_config.get('patch_size', 'N/A')],
+        ["VE Embedding Dim", vision_config.get('embed_dim', 'N/A')],
+        ["VE Depth", vision_config.get('depth', 'N/A')],
+        ["VE Num Heads", vision_config.get('num_heads', 'N/A')],
+        ["VE Num Frames (Tubelet)", f"{vision_config.get('num_frames', 'N/A')} (x{vision_config.get('tubelet_size', 'N/A')})"],
+        ["VE Checkpoint", os.path.basename(model_config.get('vision_ckpt_path', 'N/A')) if model_config.get('vision_ckpt_path') else 'N/A'],
+        ["--- MobileCLIP ---", "---"],
+        ["MobileCLIP Type", model_config.get('mobileclip_type', {}).get('name', 'N/A')],
+        ["MobileCLIP Checkpoint", os.path.basename(model_config.get('mobileclip_ckpt_path', 'N/A')) if model_config.get('mobileclip_ckpt_path') else 'N/A'],
+        ["--- Freeze Flags ---", "---"],
+        ["Freeze Vision Encoder", model_config.get('freeze_vision', 'N/A')],
+        ["Freeze MobileCLIP Vision", model_config.get('freeze_mobileclip_vision', 'N/A')],
+        ["Freeze MobileCLIP Text", model_config.get('freeze_mobileclip_text', 'N/A')],
+        ["--- LoRA/Projection Flags ---", "---"], # Added some more potentially interesting flags
+        ["Open Text LoRA", model_config.get('open_text_lora', 'N/A')],
+        ["Open Text Projection", model_config.get('open_text_projection', 'N/A')],
+    ]
+
+    # Remove the header row from data if you want to use tabulate's headers argument
+    headers = table_data[0]
+    data_rows = table_data[1:]
+
+    print("\n📋 Model Configuration Summary:")
+    print(tabulate(data_rows, headers=headers, tablefmt="fancy_grid"))
