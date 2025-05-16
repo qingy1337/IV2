@@ -378,7 +378,7 @@ class InternVideo2_CLIP_small(nn.Module):
             elif k.startswith('image_encoder.'):
                 # print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
                 # Map MobileCLIP's image_encoder keys to the single_vision_encoder module
-                new_k = 'single_vision_encoder.' + k[len('image_encoder.'):]
+                new_k = 'single_vision_encoder.' + k[len('image_encoder.model.'):]
                 new_ckpt[new_k] = v
 
         # load extra checkpoint
