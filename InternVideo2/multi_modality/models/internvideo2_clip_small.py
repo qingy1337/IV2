@@ -10,7 +10,7 @@ from PIL import Image
 import torchvision.transforms as transforms
 from torchvision.transforms import InterpolationMode
 
-from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer
+from .backbones.internvideo2 import InternVideo2, TextTransformer, ClipTokenizer, VisionTransformer, StreamingInternVideo2Student
 from .criterions import VTC_VTM_Loss
 from .utils import unwrap_state_dict
 
@@ -54,10 +54,8 @@ class InternVideo2_CLIP_small(nn.Module):
             )
         )
 
-        # Build MobileCLIP vision encoder
-        self.single_vision_encoder = self.build_single_vision_encoder(
-            projection_dim=mobileclip_cfg["embed_dim"]
-        )
+        # Build StreamingInternVideo2Student for distillation
+        self.streaming_vision_encoder = self.build_streaming_vision_encoder()
 
         # Build text encoder
         self.text_encoder = self.build_text_encoder(
@@ -198,51 +196,51 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return vfeat
 
-    # def encode_streaming_vision(self, image, prev_hidden_state):
-    #     """encode image / videos as features using the streaming ViT.
+    def encode_streaming_vision(self, image, prev_hidden_state):
+        """encode image / videos as features using the streaming ViT.
 
-    #     Args:
-    #         image (torch.Tensor): The input images.
-    #         prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
-    #             For LSTM: (h_prev, c_prev)
-    #             For GRU: h_prev
+        Args:
+            image (torch.Tensor): The input images.
+            prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
+                For LSTM: (h_prev, c_prev)
+                For GRU: h_prev
 
-    #     Returns: tuple.
-    #         - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
-    #         - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
-    #     """
+        Returns: tuple.
+            - vision_embeds (torch.Tensor): The features of all patches. Shape: [B,C].
+            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+        """
 
-    #     assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
+        assert len(image.shape) in [4, 5], f"Invalid dimension: {image.shape}"
 
-    #     vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
+        vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
 
-    #     vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
+        vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
 
-    #     return vision_embeds_aligned, new_hidden_state
+        return vision_embeds_aligned, new_hidden_state
 
-    # def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state):
-    #     """
-    #     Processes a single frame (or a small chunk of frames) with the streaming ViT and updates the hidden state.
+    def get_streaming_vid_feat(self, frames: torch.Tensor, prev_hidden_state):
+        """
+        Processes a single frame (or a small chunk of frames) with the streaming ViT and updates the hidden state.
 
-    #     Args:
-    #         frames (torch.Tensor): Input frame(s) for the ViT-Lite.
-    #             Shape: (B, C, H, W) if student_num_frames_processed_by_vit=1
-    #             Shape: (B, C, T_chunk, H, W) if student_num_frames_processed_by_vit > 1
-    #         prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
-    #             For LSTM: (h_prev, c_prev)
-    #             For GRU: h_prev
+        Args:
+            frames (torch.Tensor): Input frame(s) for the ViT-Lite.
+                Shape: (B, C, H, W) if student_num_frames_processed_by_vit=1
+                Shape: (B, C, T_chunk, H, W) if student_num_frames_processed_by_vit > 1
+            prev_hidden_state (tuple or torch.Tensor): Previous hidden state from the RNN.
+                For LSTM: (h_prev, c_prev)
+                For GRU: h_prev
 
-    #     Returns: tuple.
-    #         - vfeat (torch.Tensor): The video features.
-    #         - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
-    #     """
-    #     with torch.no_grad():
-    #         vfeat, new_hidden_state = self.encode_streaming_vision(frames, prev_hidden_state = prev_hidden_state)
+        Returns: tuple.
+            - vfeat (torch.Tensor): The video features.
+            - new_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
+        """
+        with torch.no_grad():
+            vfeat, new_hidden_state = self.encode_streaming_vision(frames, prev_hidden_state = prev_hidden_state)
 
-    #         # vfeat = self.vision_proj(vfeat)
-    #         vfeat /= vfeat.norm(dim=-1, keepdim=True)
+            # vfeat = self.vision_proj(vfeat)
+            vfeat /= vfeat.norm(dim=-1, keepdim=True)
 
-    #     return vfeat, new_hidden_state
+        return vfeat, new_hidden_state
 
     def encode_text(self, text):
         """encode text.
@@ -322,14 +320,28 @@ class InternVideo2_CLIP_small(nn.Module):
 
         return text_encoder
 
-    def build_single_vision_encoder(self, projection_dim):
-        """Build the vision transformer from MobileCLIP.
-        Returns: nn.Module. The vision encoder
-
+    def build_streaming_vision_encoder(self):
         """
-        single_vision_encoder = timm.create_model("vit_b16", projection_dim = projection_dim)
+        Build the StreamingInternVideo2Student model.
 
-        return single_vision_encoder
+        Returns: (vision_encoder, vision_layernorm). Each is a `nn.Module`.
+        """
+
+        config = self.config.model.streaming_vision_encoder
+
+        streaming_vision_encoder = StreamingInternVideo2Student(
+            vit_lite_model_name=config.vit_lite_model_name,
+            vit_lite_proj_dim=config.vit_lite_proj_dim, # Projection dimension
+            vit_lite_embed_dim=config.vit_lite_embed_dim, # Output dimension
+            rnn_type = config.rnn_type,
+            rnn_hidden_size = config.rnn_hidden_size,
+            rnn_num_layers = config.rnn_num_layers,
+            rnn_dropout = config.rnn_dropout,
+            fc_hidden_layers = config.fc_hidden_layers,
+            teacher_clip_embed_dim = config.teacher_clip_embed_dim,
+        )
+
+        return streaming_vision_encoder
 
     def load_checkpoint(self, vision_ckpt_path=None, mobileclip_ckpt_path=None, extra_ckpt_path=None):
         assert vision_ckpt_path is not None, "No vision_encoder checkpoint"
@@ -377,8 +389,8 @@ class InternVideo2_CLIP_small(nn.Module):
                 new_ckpt[k] = v
             elif k.startswith('image_encoder.'):
                 # print(f"    - Loading parameter {k} for the MobileCLIP vision encoder.")
-                # Map MobileCLIP's image_encoder keys to the single_vision_encoder module
-                new_k = 'single_vision_encoder.' + k[len('image_encoder.model.'):]
+                # Map MobileCLIP's image_encoder keys to the streaming_vision_encoder.vit_lite module
+                new_k = 'streaming_vision_encoder.vit_lite.' + k[len('image_encoder.model.'):]
                 new_ckpt[new_k] = v
 
         # load extra checkpoint

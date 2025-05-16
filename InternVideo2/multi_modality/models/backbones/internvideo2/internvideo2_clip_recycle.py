@@ -1,9 +1,12 @@
 # --- Reused/Adapted Components from InternVideo2 ---
 from .internvideo2_clip_vision import CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed
 
+from .mobileclip import TextTransformer, ClipTokenizer, VisionTransformer, vit_b16
+
 import logging
 import math
 import torch
+import timm
 import torch.nn.functional as F
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
@@ -189,21 +192,11 @@ class ViTLiteStudent(nn.Module):
 class StreamingInternVideo2Student(nn.Module):
     def __init__(
             self,
-            # ViT-Lite parameters (passed to ViTLiteStudent)
-            img_size=224,
-            patch_size=14,
-            in_chans=3,
-            student_embed_dim=768,
-            student_depth=4,
-            student_num_heads=12,
-            vit_mlp_ratio=4.0,
-            vit_qkv_bias=True,
-            vit_drop_path_rate=0.1,
-            vit_init_values=1e-5,
-            vit_qk_normalization=False,
-            vit_sep_pos_embed=False,
-            vit_norm_layer_type='rmsnorm', # Uses RMSNorm by default.
-            # RNN parameters
+            # --- Parameters for the MobileCLIP ViT ---
+            vit_lite_model_name="vit_b16",
+            vit_lite_proj_dim=512, # Projection dimension
+            vit_lite_embed_dim=768, # Output dimension
+            # --- RNN parameters ---
             rnn_type='lstm', # 'lstm' or 'gru'
             rnn_hidden_size=1024,
             rnn_num_layers=1,
@@ -211,41 +204,24 @@ class StreamingInternVideo2Student(nn.Module):
             # Output FC layers parameters
             fc_hidden_layers=[512], # List of hidden layer sizes for FC part, empty for direct projection
             teacher_clip_embed_dim=768, # Dimension of the teacher's output
-            student_num_frames_processed_by_vit=1, # How many frames ViT-Lite sees at once
-            student_tubelet_size_for_vit=1,       # Tubelet size for ViT-Lite's PatchEmbed
         ):
         super().__init__()
 
-        if vit_norm_layer_type == "rmsnorm":
-            self.vit_norm_layer = vit_norm_layer = partial(RMSNorm, eps=1e-6)
-        else:
-            self.vit_norm_layer = vit_norm_layer = partial(nn.LayerNorm, eps=1e-6)
-
-        self.vit_lite = ViTLiteStudent(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_chans=in_chans,
-            student_embed_dim=student_embed_dim,
-            student_depth=student_depth,
-            student_num_heads=student_num_heads,
-            mlp_ratio=vit_mlp_ratio,
-            qkv_bias=vit_qkv_bias,
-            drop_path_rate=vit_drop_path_rate,
-            init_values=vit_init_values,
-            qk_normalization=vit_qk_normalization,
-            norm_layer_for_blocks=vit_norm_layer,
-            sep_pos_embed=vit_sep_pos_embed,
-            student_num_frames=student_num_frames_processed_by_vit,
-            student_tubelet_size=student_tubelet_size_for_vit,
+        # Create a MobileCLIP VisionTransformer class.
+        self.vit_lite = timm.create_model(
+            vit_lite_model_name,
+            projection_dim = vit_lite_proj_dim
         )
 
         self.rnn_hidden_size = rnn_hidden_size
         self.rnn_num_layers = rnn_num_layers
         self.rnn_type = rnn_type.lower()
 
+        # Note: The RNN input_size should match the output dimension of the MobileCLIP ViT
+        # when it is eventually plugged in. Using student_embed_dim as assumed here.
         if self.rnn_type == 'lstm':
             self.rnn = nn.LSTM(
-                input_size=student_embed_dim, # Output from ViT-Lite (CLS token)
+                input_size=vit_lite_embed_dim,
                 hidden_size=rnn_hidden_size,
                 num_layers=rnn_num_layers,
                 batch_first=True, # Expects (batch, seq, feature)
@@ -253,14 +229,14 @@ class StreamingInternVideo2Student(nn.Module):
             )
         elif self.rnn_type == 'gru':
             self.rnn = nn.GRU(
-                input_size=student_embed_dim,
+                input_size=vit_lite_embed_dim,
                 hidden_size=rnn_hidden_size,
                 num_layers=rnn_num_layers,
                 batch_first=True,
                 dropout=rnn_dropout if rnn_num_layers > 1 else 0.0
             )
         else:
-            raise ValueError(f"Unsupported RNN type: {rnn_type}. Choose 'lstm' or 'gru'.")
+            raise NotImplementedError(f"Unsupported RNN type: {rnn_type}. Choose 'lstm' / 'gru'.")
 
         # Fully Connected layers to project RNN output to teacher's embedding dimension
         fc_layers = []
