@@ -34,13 +34,13 @@ class InternVideo2_CLIP_small(nn.Module):
         self.is_pretrain = is_pretrain
 
         # Load MobileCLIP encoder configuration
-        mobileclip_cfg = json.load(
+        self.mobileclip_cfg = mobileclip_cfg = json.load(
             open(os.path.join(
                 "./models/backbones/internvideo2/mobileclip/configs/" +
                 f"{self.config.model.mobileclip_type.name}.json"))
         )
         if tokenizer is None:
-            self.tokenizer = ClipTokenizer(mobileclip_cfg)
+            self.tokenizer = ClipTokenizer(self.mobileclip_cfg)
 
         # Build vision encoder
         self.vision_encoder = self.build_vision_encoder()
@@ -59,8 +59,8 @@ class InternVideo2_CLIP_small(nn.Module):
 
         # Build text encoder
         self.text_encoder = self.build_text_encoder(
-            cfg=mobileclip_cfg['text_cfg'],
-            projection_dim=mobileclip_cfg["embed_dim"]
+            cfg=self.mobileclip_cfg['text_cfg'],
+            projection_dim=self.mobileclip_cfg["embed_dim"]
         )
 
         # Initialize temperature parameter
@@ -330,8 +330,8 @@ class InternVideo2_CLIP_small(nn.Module):
         config = self.config.model.streaming_vision_encoder
 
         streaming_vision_encoder = StreamingInternVideo2Student(
-            vit_lite_model_name=config.vit_lite_model_name,
-            vit_lite_proj_dim=config.vit_lite_proj_dim, # Projection dimension
+            vit_lite_model_name=self.mobileclip_cfg["image_cfg"]["model_name"],
+            vit_lite_proj_dim=self.mobileclip_cfg["embed_dim"], # Projection dimension
             vit_lite_embed_dim=config.vit_lite_embed_dim, # Output dimension
             rnn_type = config.rnn_type,
             rnn_hidden_size = config.rnn_hidden_size,
