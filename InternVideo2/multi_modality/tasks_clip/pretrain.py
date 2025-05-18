@@ -360,21 +360,35 @@ def train(
 
     if config.distributed:
         for loader in train_loaders: loader.sampler.set_epoch(epoch)
-        for loader in mobileclip_train_loaders: loader.sampler.set_epoch(epoch) # Also for MC loaders
+        for loader in mobileclip_train_loaders: loader.sampler.set_epoch(epoch)
 
     # Aggregate loaders
     train_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
-    mobileclip_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(mc_media_types, mobileclip_train_loaders))), skip_num=skip_num) # Aggregator for MC
+    mobileclip_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(mc_media_types, mobileclip_train_loaders))), skip_num=skip_num)
 
-    # Zip the iterators. The loop will stop when the shorter iterator is exhausted.
-    # Ensure they have comparable lengths or handle exhaustion gracefully if needed.
-    # For simplicity, we assume they yield a comparable number of batches.
-    combined_iterator_input = list(zip(train_loader_agg, mobileclip_loader_agg)) # Materialize to get length for tqdm
+    # Determine the number of batches for the tqdm progress bar
+    # Your logs indicate they have the same length (6202 batches each).
+    num_batches_train = len(train_loader_agg)
+    num_batches_mc = len(mobileclip_loader_agg)
 
-    # Use the metric_logger's iterator for logging, but iterate over the combined list
-    # Need a small wrapper or manual progress update for tqdm with metric_logger
-    num_batches = len(combined_iterator_input)
-    progress_bar = tqdm(range(num_batches), desc=header, disable=not is_main_process())
+    num_batches_to_iterate = min(num_batches_train, num_batches_mc)
+    if num_batches_train != num_batches_mc:
+        logger.warning(
+            f"Train loaders have {num_batches_train} batches, MobileCLIP loaders have {num_batches_mc} batches. "
+            f"Iterating for {num_batches_to_iterate} batches (the minimum)."
+        )
+    # If they are guaranteed to be the same, you can just use num_batches_train
+
+    # Create an iterator by zipping the two MetaLoaders. DO NOT convert to list().
+    combined_iterable = zip(train_loader_agg, mobileclip_loader_agg)
+
+    # tqdm can take an iterable directly and an optional 'total' for the progress bar display.
+    progress_bar = tqdm(
+        combined_iterable,
+        total=num_batches_to_iterate,
+        desc=header,
+        disable=not is_main_process()
+    )
 
     MODEL_MAX_FRAMES = config.num_frames
     cosine_loss_base_fn = CosineEmbeddingLoss()
@@ -384,9 +398,13 @@ def train(
         target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
         return cosine_loss_base_fn(student_embedding, teacher_embedding, target)
 
-    for i in progress_bar:
-        (media_type, (image, text, idx)), (mc_media_type, (mc_image, mc_text, mc_idx)) = combined_iterator_input[i]
+    # Iterate over the progress_bar, which yields items from combined_iterable
+    # The 'i' from enumerate is still useful for log_freq checks if needed.
+    for i, data_pair in enumerate(progress_bar):
+        # Unpack the data pair from the zipped loaders
+        (media_type, (image, text, idx)), (mc_media_type, (mc_image, mc_text, mc_idx)) = data_pair
 
+        # Move input data to the designated compute device
         image = image.to(device, non_blocking=True)
         # idx = idx.to(device, non_blocking=True) # Not used here
         mc_image = mc_image.to(device, non_blocking=True)
