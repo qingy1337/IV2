@@ -130,7 +130,8 @@ def evaluate_streaming_similarity(
     video_path,
     model_max_frames,
     output_dir,
-    global_step # Current training step for filename
+    global_step, # Current training step for filename
+    config
 ):
     """
     Evaluates the cosine similarity between streaming and full window features
@@ -209,7 +210,10 @@ def evaluate_streaming_similarity(
             )
 
             # Align and Normalize the raw streaming embedding
-            aligned_stream_embedding = model.streaming_vision_align(raw_stream_embedding)
+            if config.model.use_streaming_vision_align:
+                aligned_stream_embedding = model.streaming_vision_align(raw_stream_embedding)
+            else:
+                aligned_stream_embedding = model.vision_align(raw_stream_embedding)
             stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
 
             # Update the hidden state for the next frame
@@ -479,7 +483,10 @@ def train(
                     current_streaming_frame_mc, curr_hidden_state # Use mc data and hidden state
                 )
                 # Align the streaming output (shared alignment layer)
-                aligned_stream_emb_mc = model_without_ddp.streaming_vision_align(raw_stream_emb_mc)
+                if config.model.use_streaming_vision_align:
+                    aligned_stream_emb_mc = model_without_ddp.streaming_vision_align(raw_stream_emb_mc)
+                else:
+                    aligned_stream_emb_mc = model_without_ddp.vision_align(raw_stream_emb_mc)
                 stream_embedding = aligned_stream_emb_mc / (aligned_stream_emb_mc.norm(dim=-1, keepdim=True) + 1e-9)
 
                 # --- Target Embedding Calculation (using original image and full encoder) ---
@@ -589,7 +596,8 @@ def train(
             avg_sim = evaluate_streaming_similarity(
                 model=model_without_ddp, device=device, transform=mobileclip_transform,
                 video_path=EVAL_VIDEO_PATH, model_max_frames=MODEL_MAX_FRAMES,
-                output_dir=config.output_dir, global_step=global_step
+                output_dir=config.output_dir, global_step=global_step,
+                config = config
             )
             metric_logger.update(eval_avg_sim=avg_sim)
             logger.info(f"Evaluation at step {global_step} complete. Avg Sim: {avg_sim:.4f}")
@@ -651,18 +659,7 @@ def train(
         log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix="train/")
 
     return global_step
-# Note: You need to ensure the following are defined and imported correctly:
-# - MetricLogger, SmoothedValue (from vision_language_pretraining.common.utils.metric_logger or similar)
-# - MetaLoader_rs, get_media_types (from vision_language_pretraining.data.loader or similar)
-# - CosineEmbeddingLoss (from torch.nn)
-# - is_main_process (from vision_language_pretraining.common.utils.dist_utils or similar)
-# - log_dict_to_wandb (from vision_language_pretraining.common.utils.logger or similar, assuming wandb integration)
-# - save_debug_step_data (your custom function)
-# - logger (standard Python logging object)
-# - Your InternVideo2_CLIP_Small model class and its methods (streaming_vision_encoder, vision_encoder, streaming_vision_align, vision_align, init_hidden, transform, config)
-# - config object with necessary attributes (log_freq, distributed, use_half_precision, use_bf16, optimizer.max_grad_norm, wandb.enable, output_dir, num_frames, size_t, save_iter, debug, deepspeed.enable)
-# - tokenizer object
-# - optimizer, scheduler, scaler objects instantiated before calling train.
+
 
 def clone_collate_fn(batch):
     # Recursively clone every Tensor in the sample so its storage is fresh

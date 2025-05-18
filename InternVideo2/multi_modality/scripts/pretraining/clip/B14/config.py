@@ -81,6 +81,7 @@ model = dict(
     ),
     temp=1 / 100.0,
     temp_min=1 / 100.0,
+    use_streaming_vision_align = False,
     freeze_vision=True,
     freeze_mobileclip_vision=True, # Freeze the MobileCLIP vision encoder
     open_vision_clip_projector=False,

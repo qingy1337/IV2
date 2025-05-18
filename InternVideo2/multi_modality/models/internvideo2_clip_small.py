@@ -54,13 +54,14 @@ class InternVideo2_CLIP_small(nn.Module):
             )
         )
 
-        self.streaming_vision_align = nn.Sequential(
-            nn.LayerNorm(self.config.model.vision_encoder.clip_embed_dim),
-            nn.Linear(
-                self.config.model.vision_encoder.clip_embed_dim,
-                self.config.model.vision_encoder.align_dim
+        if config.model.use_streaming_vision_align:
+            self.streaming_vision_align = nn.Sequential(
+                nn.LayerNorm(self.config.model.vision_encoder.clip_embed_dim),
+                nn.Linear(
+                    self.config.model.vision_encoder.clip_embed_dim,
+                    self.config.model.vision_encoder.align_dim
+                )
             )
-        )
 
         # Build StreamingInternVideo2Student for distillation
         self.streaming_vision_encoder = self.build_streaming_vision_encoder()
@@ -222,7 +223,10 @@ class InternVideo2_CLIP_small(nn.Module):
 
         vision_embeds, new_hidden_state = self.streaming_vision_encoder(image, prev_hidden_state=prev_hidden_state)
 
-        vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
+        if self.config.use_streaming_vision_align:
+            vision_embeds_aligned = self.streaming_vision_align(vision_embeds)
+        else:
+            vision_embeds_aligned = self.vision_align(vision_embeds)
 
         return vision_embeds_aligned, new_hidden_state
 
