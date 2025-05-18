@@ -22,7 +22,7 @@ available_corpus = dict(
         media_type="video"
     ),
     slim_kinetics=dict(
-        anno_path=f"{root_path}/kinetics-dataset/k600/train/train/kinetics_v2.json",
+        anno_path=f"{root_path}/kinetics-dataset/k600/train/train/kinetics_v2_sampled.json",
         data_root=f"{root_path}/kinetics-dataset/k600/train/train",
         media_type="video",
         min_caption_length=1
