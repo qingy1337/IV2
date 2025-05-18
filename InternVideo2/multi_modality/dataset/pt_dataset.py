@@ -84,7 +84,7 @@ class ImgTxtPtTrainDataset(BaseDataset):
                             if logged_count >= 5: # Limit the number of examples
                                 break
 
-                    raise Exception("Breakpoint reached!")
+                    # raise Exception("Breakpoint reached!")
                     annos = [anno for anno, l in zip(annos, captions_len) if l >= self.min_caption_length]
 
                 if num_epochs < 1:
