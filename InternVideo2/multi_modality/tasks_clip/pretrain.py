@@ -551,14 +551,15 @@ def train(
                 # Adjusted debug saving to reflect the inputs used for the single loss
                 if log_debug and i == 0 and frame_window_step_idx == 0 :
                      logger.info(f"Saving debug data at global step {global_step}, frame index {current_frame_in_video_idx}")
-                    #  save_debug_step_data(
-                    #     output_dir=config.output_dir, global_step=global_step, frame_idx=current_frame_in_video_idx,
-                    #     actual_window_input_orig=current_window_frames_orig[0].cpu(), # Input to target encoder
-                    #     stream_embedding_output=stream_embedding[0].cpu(), # Output of streaming path
-                    #     target_embedding_output=target_embedding[0].cpu(), # Output of target path
-                    #     model_state_dict=model_without_ddp.state_dict()
-                    # )
-
+                     save_debug_step_data(
+                        output_dir=config.output_dir, global_step=global_step, frame_idx=current_frame_in_video_idx,
+                        new_frame_input=current_streaming_frame_mc[0].cpu(), # Input to streaming encoder
+                        current_hidden_state_input=tuple(h[0].detach().cpu() for h in curr_hidden_state_mc), # Hidden state input
+                        actual_window_input=current_window_frames_orig[0].cpu(), # Input to target encoder
+                        stream_embedding_output=stream_embedding[0].cpu(), # Output of streaming pipeline
+                        target_embedding_output=target_embedding[0].cpu(), # Output of target pipeline
+                        model_state_dict=model_without_ddp.state_dict()
+                    )
             # Average loss over the frames in the batch item
             # This is important: backward pass should be on the average or sum of losses
             # from all sliding windows in the batch.
