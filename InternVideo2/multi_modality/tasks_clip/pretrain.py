@@ -549,6 +549,7 @@ def train(
                 # Adjusted debug saving to reflect the inputs used for the single loss
                 if log_debug and i == 0 and frame_window_step_idx == 0 :
                      logger.info(f"Saving debug data at global step {global_step}, frame index {current_frame_in_video_idx}")
+                     logger.info(f"Saving to {config.output_dir}")
                      save_debug_step_data(
                         output_dir=config.output_dir, global_step=global_step, frame_idx=current_frame_in_video_idx,
                         new_frame_input=current_streaming_frame_mc[0].cpu(), # Input to streaming encoder
