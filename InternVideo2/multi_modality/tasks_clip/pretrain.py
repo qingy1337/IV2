@@ -765,7 +765,7 @@ def main(config):
             global_step = train(
                 model,
                 train_loaders,
-                mobileclip_train_loaders
+                mobileclip_train_loaders,
                 optimizer,
                 tokenizer,
                 epoch,
