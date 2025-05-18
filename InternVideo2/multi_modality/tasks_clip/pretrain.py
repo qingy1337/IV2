@@ -441,30 +441,18 @@ def train(
             B_orig, C_orig, T_orig, H_orig, W_orig = image.shape
             assert T_orig >= MODEL_MAX_FRAMES, f"Video (orig) has {T_orig} frames, needs {MODEL_MAX_FRAMES}."
 
-            curr_hidden_state_orig = model.streaming_vision_encoder.init_hidden(batch_size=B_orig, device=device)
-            with torch.no_grad():
-                for frame_idx in range(MODEL_MAX_FRAMES - 1):
-                    initial_frame = image[:, :, frame_idx, :, :].unsqueeze(2)
-                    _, new_hidden_state_orig = model.streaming_vision_encoder(initial_frame, curr_hidden_state_orig)
-                    curr_hidden_state_orig = new_hidden_state_orig
-
             # Process MobileCLIP Data
             # > mc_image is shape [B, T, C, H, W], permute to [B, C, T, H, W]
             mc_image = mc_image.permute(0, 2, 1, 3, 4)
             B_mc, C_mc, T_mc, H_mc, W_mc = mc_image.shape
             assert T_mc >= MODEL_MAX_FRAMES, f"Video (MC) has {T_mc} frames, needs {MODEL_MAX_FRAMES}."
-            # Ensure batch sizes are compatible if processing in the same step, or handle individually
-            # For this example, assume B_orig == B_mc for simplicity of batch operations.
-            # If they can differ, the init_hidden and subsequent operations might need adjustment
-            # or process them more sequentially within the frame loop.
-            # Here, we assume they have the same B and T after assertions.
 
-            curr_hidden_state_mc = model.streaming_vision_encoder.init_hidden(batch_size=B_mc, device=device)
+            # Warm up and accumulate the hidden state on the first `MODEL_MAX_FRAMES - 1` frames.
+            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=B_mc, device=device)
             with torch.no_grad():
                 for frame_idx in range(MODEL_MAX_FRAMES - 1):
                     initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
-                    _, new_hidden_state_mc = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state_mc)
-                    curr_hidden_state_mc = new_hidden_state_mc
+                    _, curr_hidden_state = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state)
 
             # Determine the number of sliding window steps
             # This should be the same for both if T_orig and T_mc are the same.
@@ -474,16 +462,6 @@ def train(
             assert num_sliding_windows == T_mc - (MODEL_MAX_FRAMES - 1), "Video lengths mismatch between original and mc data streams!"
 
             total_loss_accumulator = 0.0 # Accumulate loss over frames in a batch
-
-            # Initialize hidden state for the streaming encoder using mc_image prefix
-            # This was already done before the loop, ensure it's correct:
-            # curr_hidden_state_mc = model.streaming_vision_encoder.init_hidden(batch_size=B_mc, device=device)
-            # with torch.no_grad():
-            #     for frame_idx in range(MODEL_MAX_FRAMES - 1):
-            #         initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
-            #         _, new_hidden_state_mc = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state_mc)
-            #         curr_hidden_state_mc = new_hidden_state_mc
-            # (Keeping the initialisation/warm-up code from above the snippet)
 
             # Iterate over frames for loss calculation
             # The loop goes from the first frame that completes a window up to the last frame.
@@ -498,7 +476,7 @@ def train(
                 current_streaming_frame_mc = mc_image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
                 # Pass mc_image frame and its hidden state to the streaming encoder
                 raw_stream_emb_mc, new_hidden_state_mc_updated = model.streaming_vision_encoder(
-                    current_streaming_frame_mc, curr_hidden_state_mc # Use mc data and hidden state
+                    current_streaming_frame_mc, curr_hidden_state # Use mc data and hidden state
                 )
                 # Align the streaming output (shared alignment layer)
                 aligned_stream_emb_mc = model_without_ddp.streaming_vision_align(raw_stream_emb_mc)
@@ -538,7 +516,7 @@ def train(
 
                 # --- Update hidden states for the next frame in the sliding window ---
                 # ONLY update the hidden state for the streaming encoder (which processed mc_image)
-                curr_hidden_state_mc = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
+                curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
 
 
                 # --- Logging for this frame step (optional, can be noisy) ---
@@ -553,7 +531,7 @@ def train(
                      save_debug_step_data(
                         output_dir=config.output_dir, global_step=global_step, frame_idx=current_frame_in_video_idx,
                         new_frame_input=current_streaming_frame_mc[0].cpu(), # Input to streaming encoder
-                        current_hidden_state_input=tuple(h[0].detach().cpu() for h in curr_hidden_state_mc), # Hidden state input
+                        current_hidden_state_input=tuple(h[0].detach().cpu() for h in curr_hidden_state), # Hidden state input
                         actual_window_input=current_window_frames_orig[0].cpu(), # Input to target encoder
                         stream_embedding_output=stream_embedding[0].cpu(), # Output of streaming pipeline
                         target_embedding_output=target_embedding[0].cpu(), # Output of target pipeline
