@@ -311,11 +311,14 @@ def train(
     model_without_ddp = model.module if config.distributed else model
     model.train()
 
+    logger.info('-'*20)
+
+    # Sanity check for which params are unfrozen
     for name, param in model_without_ddp.named_parameters():
         if param.requires_grad:
-            print(f"Unfrozen Parameter: {name}")
+            logger.info(f"Unfrozen Parameter: {name}")
 
-    raise Exception("Checkpoint reached.")
+    logger.info('-'*20)
 
     try:
         inference_transform = model_without_ddp.transform
