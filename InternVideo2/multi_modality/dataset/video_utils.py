@@ -47,7 +47,7 @@ def get_frame_indices_by_fps():
     pass
 
 
-def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps=1, max_num_frames=100):
+def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps=1, max_num_frames=100, log = False):
     """
     Returns a list of frame indices.
 
@@ -58,6 +58,7 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
         fix_start (int, optional): Fix start frame for uniform sampling. Defaults to None.
         input_fps (int, optional): Input video FPS. Defaults to 1.
         max_num_frames (int, optional): Maximum number of frames to return. Defaults to -1 (no limit).
+        log (bool, optional): Whether to log info.
 
     Returns:
         list: A list of frame indices.
@@ -66,7 +67,8 @@ def get_frame_indices(num_frames, vlen, sample='rand', fix_start=None, input_fps
     max_num_frames = 248 # >> MANUAL OVERRIDE RRR RRRR RRR RRR
 
     if sample == 'all':
-        logger.info(f"Video Utils --- Sampling All with {max_num_frames} max frames")
+        if log:
+            logger.info(f"Video Utils --- Sampling All with {max_num_frames} max frames")
         frame_indices = list(range(vlen))
         if max_num_frames > 0 and len(frame_indices) > max_num_frames:
             frame_indices = frame_indices[:max_num_frames]
