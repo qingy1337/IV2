@@ -54,6 +54,14 @@ class InternVideo2_CLIP_small(nn.Module):
             )
         )
 
+        self.streaming_vision_align = nn.Sequential(
+            nn.LayerNorm(self.config.model.vision_encoder.clip_embed_dim),
+            nn.Linear(
+                self.config.model.vision_encoder.clip_embed_dim,
+                self.config.model.vision_encoder.align_dim
+            )
+        )
+
         # Build StreamingInternVideo2Student for distillation
         self.streaming_vision_encoder = self.build_streaming_vision_encoder()
 
