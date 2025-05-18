@@ -306,6 +306,9 @@ def train(
     """
     Performs one epoch of training with periodic evaluation.
     """
+
+    model_without_ddp = model.module if config.distributed else model
+
     # Set the model to training mode
     model.train()
 
@@ -314,22 +317,22 @@ def train(
     # If not, you might need to create it using get_inference_transform(config.model.vision_encoder.img_size)
     # Make sure config.model.vision_encoder.img_size is available or use a default like config.size_t
     try:
-        inference_transform = model.transform # Access transform from model
+        inference_transform = model_without_ddp.transform # Access transform from model
         # Assuming model config is accessible and has img_size
-        IMG_SIZE = model.config.model.vision_encoder.img_size
+        IMG_SIZE = model_without_ddp.config.model.vision_encoder.img_size
     except AttributeError:
         logger.warning("Model does not have a 'transform' or 'config.model.vision_encoder.img_size' attribute. Using default transform.")
 
-        model_type = type(model).__name__
+        model_type = type(model_without_ddp).__name__
         error_message = (
             f"Model '{model_type}' does not have expected attributes. "
             f"Attempting to use default transform. "
         )
-        if not hasattr(model, 'transform'):
+        if not hasattr(model_without_ddp, 'transform'):
             error_message += "Model missing 'transform' attribute. "
-        if not hasattr(model, 'config'):
+        if not hasattr(model_without_ddp, 'config'):
             error_message += "Model missing 'config' attribute. "
-        elif not hasattr(model.config, 'model') or not hasattr(model.config.model, 'vision_encoder') or not hasattr(model.config.model.vision_encoder, 'img_size'):
+        elif not hasattr(model_without_ddp.config, 'model') or not hasattr(model_without_ddp.config.model, 'vision_encoder') or not hasattr(model_without_ddp.config.model.vision_encoder, 'img_size'):
             error_message += "Model config missing 'model.vision_encoder.img_size'. "
         logger.warning(error_message)
 
@@ -382,7 +385,6 @@ def train(
 
     train_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
 
-    model_without_ddp = model.module if config.distributed else model
     iterator = metric_logger.log_every(train_loader_agg, log_freq, header)
 
     MODEL_MAX_FRAMES = config.num_frames
