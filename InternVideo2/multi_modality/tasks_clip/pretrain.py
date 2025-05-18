@@ -597,7 +597,7 @@ def train(
             model.train() # Ensure model is back in training mode
 
         # --- Log to console and W&B ---
-        if i % log_freq == 0 or i == num_batches - 1: # Log on log_freq and last iteration
+        if i % log_freq == 0: # Log on log_freq and last iteration
             # Update progress bar with current metrics (manual since not using metric_logger.log_every directly)
             log_payload = {
                 "lr": optimizer.param_groups[0]["lr"],
@@ -613,7 +613,7 @@ def train(
 
             # Actual logging via logger
             if is_main_process(): # Avoid DDP spam
-                logger.info(f"{header} [{i}/{num_batches}] {metric_logger}")
+                logger.info(f"{header} [{i}] {metric_logger}")
 
             if is_main_process() and config.wandb.enable: # Log to W&B
                 averaged_logs = metric_logger.get_global_avg_dict() # These are windowed averages
