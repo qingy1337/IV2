@@ -817,7 +817,7 @@ def main(config):
                 scaler,
                 config,
                 data_type,
-                skip_num = global_step - start_step
+                skip_num = global_step - start_step,
                 log_debug = True
             )
 
