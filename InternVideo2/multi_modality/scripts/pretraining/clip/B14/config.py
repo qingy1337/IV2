@@ -6,7 +6,7 @@ train_corpus = "slim_kinetics"
 train_file = "${available_corpus[${train_corpus}]}"  # for lazy evaluation
 test_file = dict(act_val=available_corpus["slim_kinetics_act_val"])
 test_types = ["act_val"]
-num_workers = 0
+num_workers = 2
 
 stop_key = None
 
