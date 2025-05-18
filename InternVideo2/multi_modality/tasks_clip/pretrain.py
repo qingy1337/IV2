@@ -564,7 +564,8 @@ def train(
                 if config.optimizer.max_grad_norm > 0:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
                 optimizer.step()
-        scheduler.step() # Assuming step-based scheduler
+
+            scheduler.step() # Assuming step-based scheduler
 
         # --- Logging Metrics (after optimizer step for the batch) ---
         # Log the per-batch averaged losses and similarities
