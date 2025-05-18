@@ -318,9 +318,23 @@ def train(
         # Assuming model config is accessible and has img_size
         IMG_SIZE = model.config.model.vision_encoder.img_size
     except AttributeError:
-         logger.warning("Model does not have a 'transform' or 'config.model.vision_encoder.img_size' attribute. Using default transform.")
-         IMG_SIZE = config.get('size_t', 224) # Fallback to config if model attributes not found
-         inference_transform = get_inference_transform(IMG_SIZE)
+        logger.warning("Model does not have a 'transform' or 'config.model.vision_encoder.img_size' attribute. Using default transform.")
+
+        model_type = type(model).__name__
+        error_message = (
+            f"Model '{model_type}' does not have expected attributes. "
+            f"Attempting to use default transform. "
+        )
+        if not hasattr(model, 'transform'):
+            error_message += "Model missing 'transform' attribute. "
+        if not hasattr(model, 'config'):
+            error_message += "Model missing 'config' attribute. "
+        elif not hasattr(model.config, 'model') or not hasattr(model.config.model, 'vision_encoder') or not hasattr(model.config.model.vision_encoder, 'img_size'):
+            error_message += "Model config missing 'model.vision_encoder.img_size'. "
+        logger.warning(error_message)
+
+        IMG_SIZE = config.get('size_t', 224) # Fallback to config if model attributes not found
+        inference_transform = get_inference_transform(IMG_SIZE)
 
     # --- Configuration for Periodic Evaluation ---
     EVAL_FREQ_STEPS = config.eval_freq_steps
