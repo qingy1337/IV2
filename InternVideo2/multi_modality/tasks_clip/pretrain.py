@@ -721,7 +721,6 @@ def setup_dataloaders(config, mode="pt"):
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
     return train_loaders, test_name2loaders, media_types, mobileclip_train_loaders
 
-
 def main(config):
     if is_main_process() and config.wandb.enable:
         run = setup_wandb(config)
@@ -740,8 +739,6 @@ def main(config):
 
     config.scheduler.num_training_steps = num_steps_per_epoch * config.scheduler.epochs
     config.scheduler.num_warmup_steps = num_steps_per_epoch * config.scheduler.warmup_epochs
-    # set cudnn.benchmark=True only when input size is fixed
-    # https://discuss.pytorch.org/t/what-does-torch-backends-cudnn-benchmark-do/5936/3
     cudnn.benchmark = len(train_media_types) == 1
 
     model_cls = eval(config.model.get('model_cls', 'InternVideo2_CLIP'))
@@ -764,9 +761,6 @@ def main(config):
     if is_main_process() and config.wandb.enable:
         wandb.watch(model)
 
-    best = 0
-    best_epoch = 0
-
     if config.get('use_bf16', True):
         data_type = torch.bfloat16
     else:
@@ -776,6 +770,7 @@ def main(config):
     logger.info(f"Epoch: {start_epoch}")
     start_time = time.time()
     start_step = start_epoch * num_steps_per_epoch
+
     for epoch in range(start_epoch, config.scheduler.epochs):
         if not config.evaluate:
             global_step = train(
@@ -795,8 +790,7 @@ def main(config):
                 log_debug = True
             )
 
-        # save checkpoint befor evaluation
-        # only save those with gradient
+        # Save checkpoint before next epoch
         if hasattr(config, "deepspeed") and config.deepspeed.enable:
             if config.get("save_latest", False):
                 tag = "ckpt_latest.pth"
@@ -811,7 +805,6 @@ def main(config):
             }
             for k in list(state_dict.keys()):
                 if k in param_grad_dict.keys() and not param_grad_dict[k]:
-                    # delete parameters that do not require gradient
                     logger.info(f"Not saving {k}")
                     del state_dict[k]
 
@@ -829,68 +822,13 @@ def main(config):
             else:
                 torch.save(save_obj, join(config.output_dir, f"ckpt_{epoch:02d}.pth"))
 
-        # evaluation
-        with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
-            eval_res = {}
-            for test_name, test_loader in test_name2loaders.items():
-                if test_name not in config.test_types:
-                    logger.info(
-                        f"Skip eval {test_name} split. All test_types {config.test_types}"
-                    )
-                    continue
-                res = evaluation_wrapper(
-                    model_without_ddp, test_loader, tokenizer, device, config, data_type=data_type, prefix=test_name
-                )
-                eval_res.update(res)
-
-        # save the best checkpoint
-        if is_main_process():
-            # log to wandb
-            if config.wandb.enable:
-                for p, v in eval_res.items():
-                    log_dict_to_wandb(v, step=global_step, prefix=p)
-
-            if config.stop_key is not None and config.stop_key in eval_res:
-                cur_r_mean = eval_res[config.stop_key]["r_mean"]
-            else:  # None
-                cur_r_mean = best + 1  # save the last as the best
-
-            eval_res = pd.DataFrame(eval_res)
-            logger.info(f"Epoch {epoch}")
-            logger.info(f"\n{eval_res.transpose().to_string(max_cols=30)}")
-
-            eval_res.to_json(join(config.output_dir, "eval_res_latest.json"))
-
-            if not config.evaluate and cur_r_mean > best:
-                if not hasattr(config, "deepspeed") or not config.deepspeed.enable:
-                    torch.save(save_obj, join(config.output_dir, "ckpt_best.pth"))
-                eval_file = "eval_res_best.json"
-                eval_res.to_json(join(config.output_dir, eval_file))
-                best = cur_r_mean
-                best_epoch = epoch
-
-        if hasattr(config, "deepspeed") and config.deepspeed.enable:
-            r_mean_best = torch.tensor([0.0, 0.0]).to(device)
-            if is_main_process():
-                r_mean_best[0] = cur_r_mean
-                r_mean_best[1] = best
-            dist.broadcast(r_mean_best, 0)
-            cur_r_mean, best = r_mean_best[0].item(), r_mean_best[1].item()
-
-            if not config.evaluate and cur_r_mean > best:
-                model.save_checkpoint(config.output_dir, tag="ckpt_best.pth", save_latest=False, exclude_frozen_parameters=True)
-
-        if config.evaluate:
-            break
-
+        # -- End of Epoch --
         start_step = global_step
-
         dist.barrier()
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     logger.info(f"Training time {total_time_str}")
-    logger.info(f"best epoch {best_epoch} [config.stop_key {config.stop_key}]")
     logger.info(f"Checkpoints and Logs saved at {config.output_dir}")
 
     if is_main_process() and config.wandb.enable:
