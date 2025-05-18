@@ -75,6 +75,16 @@ class ImgTxtPtTrainDataset(BaseDataset):
                     captions_len = [len(caption.split()) for caption in captions]
                     logger.info(f"Num samples: {len(captions)}")
                     logger.info(f"Num too short: {sum(l < self.min_caption_length for l in captions_len)}")
+                    logger.info(f"Examples of too short captions (len < {self.min_caption_length}):")
+                    logged_count = 0
+                    for anno, l in zip(annos, captions_len):
+                        if l < self.min_caption_length:
+                            logger.info(f"  - Len {l}: '{anno['caption']}'")
+                            logged_count += 1
+                            if logged_count >= 5: # Limit the number of examples
+                                break
+
+                    raise Exception("Breakpoint reached!")
                     annos = [anno for anno, l in zip(annos, captions_len) if l >= self.min_caption_length]
 
                 if num_epochs < 1:
