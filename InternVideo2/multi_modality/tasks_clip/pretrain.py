@@ -341,9 +341,7 @@ def train(
 
     EVAL_FREQ_STEPS = config.eval_freq_steps
     logger.info(f"Getting evaluation video from {config.eval_video_repo_id} ({config.eval_video_filename})")
-    # EVAL_VIDEO_PATH = hf_hub_download(repo_id=config.eval_video_repo_id, filename=config.eval_video_filename, repo_type="dataset") # Actual download
-    EVAL_VIDEO_PATH = "dummy_eval_video.mp4" # Placeholder
-    if not os.path.exists(EVAL_VIDEO_PATH) and is_main_process() : open(EVAL_VIDEO_PATH, 'w').write('dummy') # Create dummy if not exists
+    EVAL_VIDEO_PATH = hf_hub_download(repo_id=config.eval_video_repo_id, filename=config.eval_video_filename, repo_type="dataset")
     EVAL_PLOT_OUTPUT_DIR = config.eval_plot_output_dir
     os.makedirs(EVAL_PLOT_OUTPUT_DIR, exist_ok=True)
 
