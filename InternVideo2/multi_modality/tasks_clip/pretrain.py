@@ -818,6 +818,7 @@ def main(config):
                 config,
                 data_type,
                 skip_num = global_step - start_step
+                log_debug = True
             )
 
         # save checkpoint befor evaluation
