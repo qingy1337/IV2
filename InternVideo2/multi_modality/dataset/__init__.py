@@ -136,6 +136,7 @@ def get_train_transform(config, train_file):
     # ======== Updated Code ========
     train_transform = transforms.Compose(
         [
+            aug_transform,
             transforms.Resize(
                 (config.inputs.image_res, config.inputs.image_res),
                 interpolation=InterpolationMode.BICUBIC,
