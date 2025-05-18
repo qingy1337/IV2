@@ -116,15 +116,30 @@ def get_train_transform(config, train_file):
         # Use the defined function instead of lambda
         aug_transform = transforms.Lambda(identity_transform)
 
+    # ======== Previous Code ========
+    # train_transform = transforms.Compose(
+    #     [
+    #         aug_transform,
+    #         transforms.RandomResizedCrop(
+    #             config.inputs.image_res,
+    #             scale=(0.5, 1.0),
+    #             interpolation=InterpolationMode.BICUBIC,
+    #         ),
+    #         transforms.RandomHorizontalFlip(),
+    #         type_transform,
+    #         normalize,
+    #     ]
+    # )
+    #
+    # This code is not really applicable to the new LSTM model because the horizontal flips mess up the dynamics and the RandomResizedCrop makes it harder for the model to see things.
+
+    # ======== Updated Code ========
     train_transform = transforms.Compose(
         [
-            aug_transform,
-            transforms.RandomResizedCrop(
-                config.inputs.image_res,
-                scale=(0.5, 1.0),
+            transforms.Resize(
+                (config.inputs.image_res, config.inputs.image_res),
                 interpolation=InterpolationMode.BICUBIC,
             ),
-            transforms.RandomHorizontalFlip(),
             type_transform,
             normalize,
         ]
