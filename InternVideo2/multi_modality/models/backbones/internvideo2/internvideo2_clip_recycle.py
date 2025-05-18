@@ -44,150 +44,7 @@ except ImportError:
 
     import numpy as np
 
-
-# --- Re-pasting necessary components from your InternVideo2 code ---
-# (CrossAttention, AttentiveBlock, AttentionPoolingBlock, RMSNorm, LayerScale, Attention, Mlp, Block, PatchEmbed)
-
-# --- Start of ViT-Lite and Streaming Student Model ---
-
-class ViTLiteStudent(nn.Module):
-    def __init__(
-            self,
-            img_size=224,
-            patch_size=14,
-            in_chans=3,
-            student_embed_dim=768,  # Smaller embed_dim for student
-            student_depth=4,        # Fewer layers for student
-            student_num_heads=12,   # Can be different
-            mlp_ratio=4.0,
-            qkv_bias=True,
-            drop_path_rate=0.1,
-            init_values=1e-5,
-            qk_normalization=False, # Simplified from original
-            norm_layer_for_blocks=partial(nn.LayerNorm, eps=1e-6), # Using nn.LayerNorm for simplicity
-            sep_pos_embed=False,    # Matches InternVideo2's option
-            # Student-specific parameters for PatchEmbed
-            student_num_frames=1,   # ViT-Lite processes one frame (or small chunk)
-            student_tubelet_size=1,
-            layerscale_no_force_fp32=False, # From InternVideo2
-    ):
-        super().__init__()
-        self.student_embed_dim = student_embed_dim
-        self.sep_pos_embed = sep_pos_embed
-        self.student_num_frames = student_num_frames # T for ViT-Lite
-
-        self.patch_embed = PatchEmbed(
-            img_size=img_size,
-            patch_size=patch_size,
-            in_chans=in_chans,
-            embed_dim=student_embed_dim,
-            num_frames=student_num_frames, # Critical: student processes few frames
-            tubelet_size=student_tubelet_size,
-            norm_layer=None # Norm is applied after proj in PatchEmbed
-        )
-        num_patches = self.patch_embed.num_patches # Spatial patches for T=1
-        self.num_patches = num_patches
-
-        self.cls_token = nn.Parameter(torch.zeros(1, 1, student_embed_dim))
-
-        if self.sep_pos_embed:
-            # Spatial embedding for the patches of a single frame
-            self.pos_embed_spatial = nn.Parameter(torch.zeros(1, num_patches, student_embed_dim))
-            self.pos_embed_cls = nn.Parameter(torch.zeros(1, 1, student_embed_dim))
-            # No temporal pos embed here as T_student=1 for ViT-Lite's direct input
-        else:
-            # Combined class token and spatial patches for a single frame
-            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, student_embed_dim))
-
-        self.init_pos_embed_student() # Custom init for student
-
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, student_depth)]
-        self.blocks = nn.ModuleList([
-            Block(
-                dim=student_embed_dim,
-                num_heads=student_num_heads,
-                mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias,
-                norm_layer=norm_layer_for_blocks,
-                drop_path=dpr[i],
-                init_values=init_values,
-                # Simpler Attention/MLP for student (no flash/fused by default)
-                use_flash_attn=False,
-                use_fused_mlp=False,
-                qk_normalization=qk_normalization,
-                layerscale_no_force_fp32=layerscale_no_force_fp32,
-            )
-            for i in range(student_depth)])
-
-        trunc_normal_(self.cls_token, std=.02)
-        self.apply(self._init_weights)
-
-    def init_pos_embed_student(self):
-        if self.sep_pos_embed:
-            trunc_normal_(self.pos_embed_spatial, std=.02)
-            trunc_normal_(self.pos_embed_cls, std=.02)
-            # Example using 2D sincos if desired (requires patch_embed.grid_size to be set correctly for T=1)
-            # H_grid = self.patch_embed.grid_size[1] # Assuming grid_size is (T_grid, H_grid, W_grid)
-            # W_grid = self.patch_embed.grid_size[2]
-            # pos_embed_spatial_data = get_2d_sincos_pos_embed(self.student_embed_dim, H_grid) # Assuming square grid for simplicity
-            # self.pos_embed_spatial.data.copy_(torch.from_numpy(pos_embed_spatial_data).float().unsqueeze(0))
-        else:
-            trunc_normal_(self.pos_embed, std=.02)
-            # Example: Initialize with 2D sincos for patches + CLS
-            # H_grid = self.patch_embed.grid_size[1]
-            # W_grid = self.patch_embed.grid_size[2]
-            # pos_embed_data = get_2d_sincos_pos_embed(self.student_embed_dim, H_grid, cls_token=True)
-            # self.pos_embed.data.copy_(torch.from_numpy(pos_embed_data).float().unsqueeze(0))
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm): # Handle standard LayerNorm with bias
-            if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, RMSNorm): # Handle RMSNorm (no bias)
-            # RMSNorm does not have a bias attribute
-            nn.init.constant_(m.weight, 1.0)
-
-    @property
-    def dtype(self):
-        return self.patch_embed.proj.weight.dtype
-
-    def forward(self, x_frame):
-        # x_frame is expected to be (B, C, H, W) or (B, C, T_student, H, W) where T_student=1
-        if x_frame.ndim == 4: # B, C, H, W
-            x_frame = x_frame.unsqueeze(2) # Add T dimension: B, C, 1, H, W
-
-        x = self.patch_embed(x_frame.type(self.dtype)) # Output: B, T_student_grid, L_spatial, C
-        # For T_student_grid = 1 (since student_num_frames=1, student_tubelet_size=1 for PatchEmbed)
-        # x shape: B, 1, L_spatial, C.  Need to squeeze T_student_grid.
-        x = x.squeeze(1) # B, L_spatial, C
-
-        B, L_spatial, C_dim = x.shape
-        assert L_spatial == self.num_patches
-        assert C_dim == self.student_embed_dim
-
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1) # B, 1+L_spatial, C
-
-        if self.sep_pos_embed:
-            pos_embed_patches = self.pos_embed_spatial.expand(B, -1, -1)
-            pos_embed_final = torch.cat([self.pos_embed_cls.expand(B, -1, -1), pos_embed_patches], dim=1)
-        else:
-            pos_embed_final = self.pos_embed.expand(B, -1, -1)
-
-        x = x + pos_embed_final
-
-        for blk in self.blocks:
-            x = blk(x) # Block from InternVideo2 takes single tensor input
-
-        # We'll take the CLS token as the frame feature
-        frame_feature = x[:, 0] # (B, student_embed_dim)
-        return frame_feature
-
+# --- Start of Streaming Student Model ---
 
 class StreamingInternVideo2Student(nn.Module):
     def __init__(
@@ -276,9 +133,13 @@ class StreamingInternVideo2Student(nn.Module):
             current_hidden_state (tuple or torch.Tensor): The updated RNN hidden state.
         """
         # single_frame_input shape: (B, C, T_chunk, H, W) or (B, C, H, W)
-        # ViT-Lite expects (B, C, T_chunk_for_vit, H, W)
+        # ViT-Lite expects (B, C, H, W)
         # Ensure T_chunk_for_vit matches what ViT-Lite's PatchEmbed is configured for
-        frame_feature = self.vit_lite(single_frame_input) # (B, student_embed_dim)
+
+        if len(single_frame_input.shape) == 5:
+            single_frame_input = single_frame_input.squeeze(2) # Remove the T_chunk dimension
+
+        frame_feature, _ = self.vit_lite.extract_features(single_frame_input) # (B, student_embed_dim)
 
         # RNN expects input of shape (batch, seq_len, input_size)
         # Here, seq_len is 1 because we process one ViT-Lite output at a time

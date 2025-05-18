@@ -14,23 +14,10 @@ from dataset.ret_dataset import (ImgTxtRetTrainDataset,
                                  VidTxtRetEvalDataset,
                                  VidTxtRetMCEvalDataset,
                                  VidTxtRetMCNewEvalDataset)
-# from dataset.ret_dataset import (ImgTxtRetTrainDataset,
-#                                  VidTxtRetTrainDataset,
-#                                  ImgTxtRetEvalDataset,
-#                                  VidTxtRetEvalDataset,
-#                                  AudioVidTxtRetTrainDataset,
-#                                  AudioVidTxtRetEvalDataset,
-#                                  VidTxtRetMCEvalDataset,
-#                                  AudioTxtRetTrainDataset,
-#                                  AudioTxtRetEvalDataset)
 
 from dataset.qa_dataset import ImageQADataset, VideoQADataset
 from dataset.pt_dataset import (ImgTxtPtTrainDataset,
                                 VidTxtPtTrainDataset,)
-# from dataset.pt_dataset import (ImgTxtPtTrainDataset,
-#                                 VidTxtPtTrainDataset,
-#                                 AudioVidTxtPtTrainDataset,
-#                                 AudioTxtPtTrainDataset)
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +30,6 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = ImgTxtPtTrainDataset
         elif media_type == "video":
             dataset_cls = VidTxtPtTrainDataset
-        # elif media_type == "audio_video":
-        #     dataset_cls = AudioVidTxtPtTrainDataset
-        # elif media_type == "audio":
-        #     dataset_cls = AudioTxtPtTrainDataset
         else:
             raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
     elif dataset_type == "ret_train":
@@ -54,10 +37,6 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = ImgTxtRetTrainDataset
         elif media_type == "video":
             dataset_cls = VidTxtRetTrainDataset
-        # elif media_type == 'audio':
-        #     dataset_cls = AudioTxtRetTrainDataset
-        # elif media_type == "audio_video":
-        #     dataset_cls = AudioVidTxtRetTrainDataset
         else:
             raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
     elif dataset_type == "ret_eval":
@@ -65,10 +44,6 @@ def get_dataset_cls(dataset_type, media_type, data_cfg):
             dataset_cls = ImgTxtRetEvalDataset
         elif media_type == "video":
             dataset_cls = VidTxtRetEvalDataset
-        # elif media_type == "audio":
-        #     dataset_cls = AudioTxtRetEvalDataset
-        # elif media_type == "audio_video":
-        #     dataset_cls = AudioVidTxtRetEvalDataset
         else:
             raise NotImplementedError(f"dataset_type={dataset_type}, media_type={media_type}")
     elif dataset_type in ["qa_train", 'qa_eval']:
@@ -94,7 +69,19 @@ def identity_transform(x):
     return x
 
 # Then modify your get_train_transform function
-def get_train_transform(config, train_file):
+def get_train_transform(config, train_file, use_mobileclip_transform = False, augment = False):
+    """Get the training transform based on the config and data_cfg.
+
+    Args:
+        config (dict): The configuration based on the yaml
+        train_file (string??): The path to the training file.
+        use_mobileclip_transform (bool): Whether or not to use the MobileCLIP specified transform.
+        augment (bool): Whether to augment the data in the transform.
+
+    Returns:
+        transform (Transform): The transform to use for training.
+    """
+
     vision_enc_name = config.model.vision_encoder.name
     if "internvideo" in vision_enc_name or "vit" in vision_enc_name or "umt" in vision_enc_name:
         mean = (0.485, 0.456, 0.406)
@@ -116,35 +103,46 @@ def get_train_transform(config, train_file):
         # Use the defined function instead of lambda
         aug_transform = transforms.Lambda(identity_transform)
 
-    # ======== Previous Code ========
-    # train_transform = transforms.Compose(
-    #     [
-    #         aug_transform,
-    #         transforms.RandomResizedCrop(
-    #             config.inputs.image_res,
-    #             scale=(0.5, 1.0),
-    #             interpolation=InterpolationMode.BICUBIC,
-    #         ),
-    #         transforms.RandomHorizontalFlip(),
-    #         type_transform,
-    #         normalize,
-    #     ]
-    # )
-    #
-    # This code is not really applicable to the new LSTM model because the horizontal flips mess up the dynamics and the RandomResizedCrop makes it harder for the model to see things.
-
-    # ======== Updated Code ========
-    train_transform = transforms.Compose(
-        [
-            aug_transform,
-            transforms.Resize(
-                (config.inputs.image_res, config.inputs.image_res),
-                interpolation=InterpolationMode.BICUBIC,
-            ),
-            type_transform,
-            normalize,
-        ]
-    )
+    if augment:
+        # ======== InternVideo2 Code ========
+        train_transform = transforms.Compose(
+            [
+                aug_transform,
+                transforms.RandomResizedCrop(
+                    config.inputs.image_res,
+                    scale=(0.5, 1.0),
+                    interpolation=InterpolationMode.BICUBIC,
+                ),
+                transforms.RandomHorizontalFlip(),
+                type_transform,
+                normalize,
+            ]
+        )
+    elif use_mobileclip_transform:
+        # ======== MobileCLIP Transform ========
+        train_transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    config.inputs.image_res, # Use the provided image_size
+                    interpolation=transforms.InterpolationMode.BILINEAR,
+                ),
+                transforms.CenterCrop(config.inputs.image_res), # Use the provided image_size
+                transforms.ToTensor(),
+            ]
+        )
+    else:
+        # ======== LSTM Transform ========
+        train_transform = transforms.Compose(
+            [
+                aug_transform,
+                transforms.Resize(
+                    (config.inputs.image_res, config.inputs.image_res),
+                    interpolation=InterpolationMode.BICUBIC,
+                ),
+                type_transform,
+                normalize,
+            ]
+        )
 
     return train_transform
 
@@ -178,7 +176,7 @@ def get_test_transform(config, test_file):
     return test_transform
 
 
-def create_dataset(dataset_type, config):
+def create_dataset(dataset_type, config, use_mobileclip_transform = False):
     ##########################################################
     # Shared setting for all datasets
     if config.inputs.get('video_input', None) is not None:
@@ -235,7 +233,7 @@ def create_dataset(dataset_type, config):
                 if m == "audio":
                     train_transform = None
                 else:
-                    train_transform = get_train_transform(config, train_file)
+                    train_transform = get_train_transform(config, train_file, use_mobileclip_transform = use_mobileclip_transform)
                 dataset_kwargs = dict(
                     ann_file=train_file,
                     transform=train_transform,
@@ -272,7 +270,7 @@ def create_dataset(dataset_type, config):
 
     elif dataset_type == "ret_train":
         assert isinstance(config.train_file, dict), config.train_file
-        train_transform = get_train_transform(config, config.train_file)
+        train_transform = get_train_transform(config, config.train_file, use_mobileclip_transform = use_mobileclip_transform)
         dataset_cls = get_dataset_cls(dataset_type=dataset_type,
                                       media_type=config.train_file.media_type,
                                       data_cfg=config.train_file)
@@ -309,7 +307,7 @@ def create_dataset(dataset_type, config):
         if media_type == "audio":
             train_transform = None
         else:
-            train_transform = get_train_transform(config, config.train_file)
+            train_transform = get_train_transform(config, config.train_file, use_mobileclip_transform = use_mobileclip_transform)
 
         dataset_cls = get_dataset_cls(dataset_type=dataset_type,
                                       media_type=media_type,

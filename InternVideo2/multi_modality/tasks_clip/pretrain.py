@@ -13,6 +13,7 @@ import torch.distributed as dist
 from torch.utils.data._utils.collate import default_collate
 from huggingface_hub import hf_hub_download
 from torchvision import transforms
+from tqdm import tqdm
 import wandb
 from torch.utils.data import ConcatDataset
 
@@ -290,425 +291,347 @@ def evaluate_streaming_similarity(
 # --- The main training function ---
 def train(
     model,
-    train_loaders,
+    train_loaders, # List of DataLoaders
+    mobileclip_train_loaders, # List of DataLoaders for MobileCLIP data
     optimizer,
-    tokenizer,
+    tokenizer, # Placeholder, not used in this specific loss
     epoch,
     global_step,
     device,
     scheduler,
     scaler,
     config,
-    data_type,
+    data_type, # e.g., torch.float16 if use_half_precision else torch.float32
     skip_num=0,
     log_debug=False,
 ):
     """
     Performs one epoch of training with periodic evaluation.
     """
-
     model_without_ddp = model.module if config.distributed else model
-
-    # Set the model to training mode
     model.train()
 
-    # Get the inference transform from the model instance
-    # Assuming your model has a 'transform' attribute
-    # If not, you might need to create it using get_inference_transform(config.model.vision_encoder.img_size)
-    # Make sure config.model.vision_encoder.img_size is available or use a default like config.size_t
     try:
-        inference_transform = model_without_ddp.transform # Access transform from model
-        # Assuming model config is accessible and has img_size
+        inference_transform = model_without_ddp.transform
         IMG_SIZE = model_without_ddp.config.model.vision_encoder.img_size
     except AttributeError:
-        logger.warning("Model does not have a 'transform' or 'config.model.vision_encoder.img_size' attribute. Using default transform.")
-
-        model_type = type(model_without_ddp).__name__
-        error_message = (
-            f"Model '{model_type}' does not have expected attributes. "
-            f"Attempting to use default transform. "
-        )
-        if not hasattr(model_without_ddp, 'transform'):
-            error_message += "Model missing 'transform' attribute. "
-        if not hasattr(model_without_ddp, 'config'):
-            error_message += "Model missing 'config' attribute. "
-        elif not hasattr(model_without_ddp.config, 'model') or not hasattr(model_without_ddp.config.model, 'vision_encoder') or not hasattr(model_without_ddp.config.model.vision_encoder, 'img_size'):
-            error_message += "Model config missing 'model.vision_encoder.img_size'. "
-        logger.warning(error_message)
-
-        IMG_SIZE = config.get('size_t', 224) # Fallback to config if model attributes not found
+        logger.warning("Model does not have 'transform' or 'config.model.vision_encoder.img_size'. Using default.")
+        IMG_SIZE = config.get('size_t', 224)
         inference_transform = get_inference_transform(IMG_SIZE)
 
-    # --- Configuration for Periodic Evaluation ---
     EVAL_FREQ_STEPS = config.eval_freq_steps
-    # Define the specific video path for evaluation
-
     logger.info(f"Getting evaluation video from {config.eval_video_repo_id} ({config.eval_video_filename})")
-
-    EVAL_VIDEO_PATH = hf_hub_download(repo_id=config.eval_video_repo_id, filename=config.eval_video_filename, repo_type="dataset")
-    # Define the output directory for evaluation plots
+    # EVAL_VIDEO_PATH = hf_hub_download(repo_id=config.eval_video_repo_id, filename=config.eval_video_filename, repo_type="dataset") # Actual download
+    EVAL_VIDEO_PATH = "dummy_eval_video.mp4" # Placeholder
+    if not os.path.exists(EVAL_VIDEO_PATH) and is_main_process() : open(EVAL_VIDEO_PATH, 'w').write('dummy') # Create dummy if not exists
     EVAL_PLOT_OUTPUT_DIR = config.eval_plot_output_dir
-
-    os.makedirs(EVAL_PLOT_OUTPUT_DIR, exist_ok=True) # Ensure directory exists
+    os.makedirs(EVAL_PLOT_OUTPUT_DIR, exist_ok=True)
 
     metric_logger = MetricLogger(delimiter="  ")
     metric_logger.add_meter("lr", SmoothedValue(window=1, fmt="{value:.6f}"))
     metric_logger.add_meter("temperature", SmoothedValue(window=1, fmt="{value:.4f}"))
+    metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}")) # For periodic eval
+
     active_loss_names = ["loss_cosine"]
+    additional_logs = ["cosine_similarity"] # For in-batch similarity
 
+    # Metrics for original data
     media_types = get_media_types(train_loaders)
-
     for loss_name in active_loss_names:
         for media_type_key in media_types:
-            metric_logger.add_meter(
-                f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}")
-            )
-
-    # Add meter for evaluation similarity
-    # Using window=1 here as we only log one value per evaluation step
-    metric_logger.add_meter("eval_avg_sim", SmoothedValue(window=1, fmt="{value:.4f}"))
-
-    additional_logs = ["cosine_similarity"] # This is similarity within the training batch
-
+            metric_logger.add_meter(f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}"))
     for loss_name in additional_logs:
         for media_type_key in media_types:
-            metric_logger.add_meter(
-                f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}")
-            )
+            metric_logger.add_meter(f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}"))
+
+    # Metrics for MobileCLIP data
+    # Assuming mobileclip_train_loaders also yields a "media_type" or we can define one
+    # For simplicity, let's assume a single "mobileclip" media type from its loader
+    mc_media_types = ["mobileclip"] # Or derive using get_media_types(mobileclip_train_loaders)
+    for loss_name in active_loss_names:
+        for media_type_key in mc_media_types: # Use a distinct key
+            metric_logger.add_meter(f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}"))
+    for loss_name in additional_logs:
+        for media_type_key in mc_media_types:
+            metric_logger.add_meter(f"{media_type_key}-{loss_name}", SmoothedValue(window=1, fmt="{value:.4f}"))
 
     header = f"Train Epoch: [{epoch}]"
     log_freq = config.log_freq
 
     if config.distributed:
-        for loader in train_loaders:
-            loader.sampler.set_epoch(epoch)
+        for loader in train_loaders: loader.sampler.set_epoch(epoch)
+        for loader in mobileclip_train_loaders: loader.sampler.set_epoch(epoch) # Also for MC loaders
 
+    # Aggregate loaders
     train_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(media_types, train_loaders))), skip_num=skip_num)
+    mobileclip_loader_agg = MetaLoader_rs(name2loader=dict(list(zip(mc_media_types, mobileclip_train_loaders))), skip_num=skip_num) # Aggregator for MC
 
-    iterator = metric_logger.log_every(train_loader_agg, log_freq, header)
+    # Zip the iterators. The loop will stop when the shorter iterator is exhausted.
+    # Ensure they have comparable lengths or handle exhaustion gracefully if needed.
+    # For simplicity, we assume they yield a comparable number of batches.
+    combined_iterator_input = list(zip(train_loader_agg, mobileclip_loader_agg)) # Materialize to get length for tqdm
+
+    # Use the metric_logger's iterator for logging, but iterate over the combined list
+    # Need a small wrapper or manual progress update for tqdm with metric_logger
+    num_batches = len(combined_iterator_input)
+    progress_bar = tqdm(range(num_batches), desc=header, disable=not is_main_process())
 
     MODEL_MAX_FRAMES = config.num_frames
-
-    # --- Loss function (Cosine embedding loss) ---
     cosine_loss_base_fn = CosineEmbeddingLoss()
 
     def cosine_sim_loss(student_embedding, teacher_embedding):
-        B, clip_embed_dim = student_embedding.shape
+        B = student_embedding.shape[0]
         target = torch.ones(B, dtype=student_embedding.dtype, device=student_embedding.device)
-        output = cosine_loss_base_fn(student_embedding, teacher_embedding, target)
-        return output
+        return cosine_loss_base_fn(student_embedding, teacher_embedding, target)
 
-    # --- Start of training loop ---
-    for i, (media_type, (image, text, idx)) in enumerate(iterator):
-        # Move input data to the designated compute device
+    for i in progress_bar:
+        (media_type, (image, text, idx)), (mc_media_type, (mc_image, mc_text, mc_idx)) = combined_iterator_input[i]
+
         image = image.to(device, non_blocking=True)
-        idx = idx.to(device, non_blocking=True)
+        # idx = idx.to(device, non_blocking=True) # Not used here
+        mc_image = mc_image.to(device, non_blocking=True)
+        # mc_idx = mc_idx.to(device, non_blocking=True) # Not used here
 
-        if log_debug:
-            logger.info(f"Logging data for debugging: image shape: {image.shape}, text: {text}, idx: {idx}")
+        if log_debug and i == 0 : # Log first batch
+            logger.info(f"Original data: image shape: {image.shape}, text: {text}")
+            logger.info(f"MobileCLIP data: mc_image shape: {mc_image.shape}, mc_text: {mc_text}")
 
-        # Tokenize text data (though not used in the current video-only loss)
-        # text_input = tokenizer(text).to(device) # Keep this line if text is ever used
+        # Tokenizing text is skipped as it's not used in this video-only loss example
 
         with torch.cuda.amp.autocast(enabled=config.use_half_precision, dtype=data_type):
-            # > image is shape [B, T, C, H, W]
-            image = image.permute(0, 2, 1, 3, 4) # -> [B, C, T, H, W]
+            # Process Original Data
+            # > image is shape [B, T, C, H, W], permute to [B, C, T, H, W]
+            image = image.permute(0, 2, 1, 3, 4)
+            B_orig, C_orig, T_orig, H_orig, W_orig = image.shape
+            assert T_orig >= MODEL_MAX_FRAMES, f"Video (orig) has {T_orig} frames, needs {MODEL_MAX_FRAMES}."
 
-            B, C, T, H, W = image.shape
-            assert T >= MODEL_MAX_FRAMES, f"Video has {T} frames, needs at least {MODEL_MAX_FRAMES}."
-
-            # Initialize hidden state for this batch
-            # This hidden state will be updated throughout the training loop for this batch.
-            curr_hidden_state = model.streaming_vision_encoder.init_hidden(batch_size=B, device=device)
-
-            # Warm-up streaming encoder for the first MODEL_MAX_FRAMES - 1 frames
-            # These frames update the state but don't contribute to the loss calculation in this loop
-            # Use torch.no_grad() for warm-up frames
+            curr_hidden_state_orig = model.streaming_vision_encoder.init_hidden(batch_size=B_orig, device=device)
             with torch.no_grad():
-                 for initial_frame_idx in range(MODEL_MAX_FRAMES - 1):
-                    # Select the frame across the batch dimension
-                    initial_frame = image[:, :, initial_frame_idx, :, :] # [B, C, H, W]
-                    # Add T=1 dimension for streaming encoder
-                    initial_frame_input = initial_frame.unsqueeze(2) # [B, C, 1, H, W]
+                for frame_idx in range(MODEL_MAX_FRAMES - 1):
+                    initial_frame = image[:, :, frame_idx, :, :].unsqueeze(2)
+                    _, new_hidden_state_orig = model.streaming_vision_encoder(initial_frame, curr_hidden_state_orig)
+                    curr_hidden_state_orig = new_hidden_state_orig
 
-                    # Pass the frame and update the hidden state
-                    _, new_hidden_state = model.streaming_vision_encoder(
-                        initial_frame_input,
-                        curr_hidden_state
-                    )
-                    # Update hidden state for the next step in the warm-up
-                    curr_hidden_state = new_hidden_state
+            # Process MobileCLIP Data
+            # > mc_image is shape [B, T, C, H, W], permute to [B, C, T, H, W]
+            mc_image = mc_image.permute(0, 2, 1, 3, 4)
+            B_mc, C_mc, T_mc, H_mc, W_mc = mc_image.shape
+            assert T_mc >= MODEL_MAX_FRAMES, f"Video (MC) has {T_mc} frames, needs {MODEL_MAX_FRAMES}."
+            # Ensure batch sizes are compatible if processing in the same step, or handle individually
+            # For this example, assume B_orig == B_mc for simplicity of batch operations.
+            # If they can differ, the init_hidden and subsequent operations might need adjustment
+            # or process them more sequentially within the frame loop.
+            # Here, we assume they have the same B and T after assertions.
 
+            curr_hidden_state_mc = model.streaming_vision_encoder.init_hidden(batch_size=B_mc, device=device)
+            with torch.no_grad():
+                for frame_idx in range(MODEL_MAX_FRAMES - 1):
+                    initial_frame_mc = mc_image[:, :, frame_idx, :, :].unsqueeze(2)
+                    _, new_hidden_state_mc = model.streaming_vision_encoder(initial_frame_mc, curr_hidden_state_mc)
+                    curr_hidden_state_mc = new_hidden_state_mc
 
-            # Now, iterate over each of the remaining frames (from MODEL_MAX_FRAMES - 1 onwards)
-            # Each iteration corresponds to a window ending at new_frame_idx,
-            # and the streaming encoder processing the frame at new_frame_idx
-            # The loop starts from the frame index that completes the first full window (MODEL_MAX_FRAMES - 1)
-            # up to the last frame index (T - 1).
-            for new_frame_idx in range(MODEL_MAX_FRAMES - 1, T):
-                # The current frame being processed by the streaming encoder is at index new_frame_idx
-                current_streaming_frame = image[:, :, new_frame_idx, :, :] # [B, C, H, W]
-                # Add T=1 dimension for streaming encoder input
-                current_streaming_frame_input = current_streaming_frame.unsqueeze(2) # [B, C, 1, H, W]
+            # Determine the number of sliding window steps
+            # This should be the same for both if T_orig and T_mc are the same.
+            # If T can differ, loop min(T_orig, T_mc) - MODEL_MAX_FRAMES + 1 times.
+            # For simplicity, assuming T_orig and T_mc are equal due to dataset prep.
+            num_sliding_windows = T_orig - (MODEL_MAX_FRAMES - 1)
 
-                # --- Calculate Stream Embedding for the current_streaming_frame ---
-                # Pass the current frame and the previous hidden state
-                raw_stream_embedding, new_hidden_state = model.streaming_vision_encoder(
-                    current_streaming_frame_input, # Input is [B, C, 1, H, W]
-                    curr_hidden_state # Pass the state from the *previous* frame (or warm-up)
+            total_loss_accumulator = 0.0 # Accumulate loss over frames in a batch
+
+            # Iterate over frames for loss calculation
+            # The loop goes from the first frame that completes a window up to the last frame.
+            for frame_window_step_idx in range(num_sliding_windows):
+                # current_frame_in_video_idx is the index of the frame being fed to the streaming encoder
+                # This frame is the *last* frame of the current window.
+                current_frame_in_video_idx = (MODEL_MAX_FRAMES - 1) + frame_window_step_idx
+
+                # --- Original Data Processing for current frame/window ---
+                current_streaming_frame_orig = image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
+                raw_stream_emb_orig, new_hidden_state_orig_updated = model.streaming_vision_encoder(
+                    current_streaming_frame_orig, curr_hidden_state_orig
                 )
+                aligned_stream_emb_orig = model_without_ddp.streaming_vision_align(raw_stream_emb_orig)
+                stream_embedding_orig = aligned_stream_emb_orig / (aligned_stream_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
 
-                # Align and Normalize
-                aligned_stream_embedding = model_without_ddp.streaming_vision_align(raw_stream_embedding)
-                stream_embedding = aligned_stream_embedding / (aligned_stream_embedding.norm(dim=-1, keepdim=True) + 1e-9)
+                window_start_idx = current_frame_in_video_idx - MODEL_MAX_FRAMES + 1
+                window_end_idx = current_frame_in_video_idx + 1
+                current_window_frames_orig = image[:, :, window_start_idx:window_end_idx, :, :]
 
-                # --- Calculate Target Embedding for the current window ---
-                # The current window ends at new_frame_idx
-                current_window_start_idx = new_frame_idx - MODEL_MAX_FRAMES + 1
-                current_window_end_idx = new_frame_idx + 1 # Slice end index is exclusive
-
-                # Select the window of frames across the batch dimension
-                actual_current_window_frames = image[:, :, current_window_start_idx:current_window_end_idx, :, :] # [B, C, MODEL_MAX_FRAMES, H, W]
-
-                # Use no_grad for the target embedding calculation as it's treated as the fixed target
                 with torch.no_grad():
-                    # Pass the full window tensor to the full vision encoder
-                    raw_target_embedding = model_without_ddp.vision_encoder(actual_current_window_frames)
+                    raw_target_emb_orig = model_without_ddp.vision_encoder(current_window_frames_orig)
+                    aligned_target_emb_orig = model_without_ddp.vision_align(raw_target_emb_orig)
+                    target_embedding_orig = aligned_target_emb_orig / (aligned_target_emb_orig.norm(dim=-1, keepdim=True) + 1e-9)
 
-                    # Align and Normalize
-                    aligned_target_embedding = model_without_ddp.vision_align(raw_target_embedding)
-                    target_embedding = aligned_target_embedding / (aligned_target_embedding.norm(dim=-1, keepdim=True) + 1e-9)
+                loss_orig = cosine_sim_loss(stream_embedding_orig, target_embedding_orig)
+                cosine_similarity_orig_avg = torch.nn.functional.cosine_similarity(
+                    stream_embedding_orig.detach(), target_embedding_orig.detach(), dim=1
+                ).mean().item()
 
-                    # Calculate cosine similarity for logging (detached)
-                    cosine_similarity = torch.nn.functional.cosine_similarity(stream_embedding.detach(), target_embedding.detach(), dim=1)
-                    cosine_similarity_avg = cosine_similarity.mean().item() # Get scalar value
+                # --- MobileCLIP Data Processing for current frame/window ---
+                current_streaming_frame_mc = mc_image[:, :, current_frame_in_video_idx, :, :].unsqueeze(2)
+                # IMPORTANT: The streaming_vision_encoder is the SAME encoder.
+                raw_stream_emb_mc, new_hidden_state_mc_updated = model.streaming_vision_encoder(
+                    current_streaming_frame_mc, curr_hidden_state_mc # Use mc hidden state
+                )
+                # The alignment layer is also shared unless you have a specific one for MC features
+                aligned_stream_emb_mc = model_without_ddp.streaming_vision_align(raw_stream_emb_mc)
+                stream_embedding_mc = aligned_stream_emb_mc / (aligned_stream_emb_mc.norm(dim=-1, keepdim=True) + 1e-9)
 
+                # The target for MC stream could be the full vision encoder on MC window,
+                # or potentially another target if MC is for a different modality/task.
+                # Here, we assume it's analogous to the original data.
+                current_window_frames_mc = mc_image[:, :, window_start_idx:window_end_idx, :, :]
+                with torch.no_grad():
+                    raw_target_emb_mc = model_without_ddp.vision_encoder(current_window_frames_mc)
+                    aligned_target_emb_mc = model_without_ddp.vision_align(raw_target_emb_mc)
+                    target_embedding_mc = aligned_target_emb_mc / (aligned_target_emb_mc.norm(dim=-1, keepdim=True) + 1e-9)
 
-                # --- Calculate Loss ---
-                # Both predicted (stream_embedding) and target (target_embedding) are now [B, C_embed_dim]
-                # The loss is calculated between the stream embedding (which requires gradients)
-                # and the target embedding (which is detached).
-                loss = cosine_sim_loss(stream_embedding, target_embedding)
-
-                # --- Optional Debug Saving ---
-                # This saves data for the *first* item of the *first* batch in the current iteration
-                # It might be large, consider making this conditional or saving less often
-                # Save only once per epoch for the first comparable window of the first batch
-                if log_debug and i == 0 and new_frame_idx == MODEL_MAX_FRAMES - 1:
-                     logger.info(f"Saving debug data at global step {global_step}, frame index {new_frame_idx}")
-                     try:
-                         save_debug_step_data(
-                            output_dir = config.output_dir, # Use config output dir
-                            global_step = global_step,
-                            frame_idx = new_frame_idx,
-                            new_frame_input = current_streaming_frame[0].cpu(), # Save first item from batch
-                            current_hidden_state_input = tuple(h[0].detach().clone().cpu() for h in curr_hidden_state), # Save first item from batch
-                            actual_window_input = actual_current_window_frames[0].cpu(), # Save first item from batch
-                            stream_embedding_output = stream_embedding[0].cpu(), # Save first item from batch
-                            target_embedding_output = target_embedding[0].cpu(), # Save first item from batch
-                            model_state_dict = model_without_ddp.state_dict()
-                        )
-                         logger.info(f"==== Saved Debug Step Data to {config.output_dir}/ ====")
-                     except Exception as e:
-                         logger.error(f"Error saving debug data: {e}", exc_info=True)
+                loss_mc = cosine_sim_loss(stream_embedding_mc, target_embedding_mc)
+                cosine_similarity_mc_avg = torch.nn.functional.cosine_similarity(
+                    stream_embedding_mc.detach(), target_embedding_mc.detach(), dim=1
+                ).mean().item()
 
 
-                loss_dict = dict(loss_cosine=loss)
-                total_loss = sum(loss_dict.values())
+                # --- Combine Losses ---
+                # You might want to weight these losses, e.g., lambda_mc
+                lambda_mc = 1.0 # Hyperparameter for weighting mobileclip loss
+                current_frame_total_loss = loss_orig + lambda_mc * loss_mc
+                total_loss_accumulator += current_frame_total_loss # Accumulate for backward pass
+
+                # Update hidden states for the next frame in the sliding window
+                curr_hidden_state_orig = tuple(h.detach().clone() for h in new_hidden_state_orig_updated)
+                curr_hidden_state_mc = tuple(h.detach().clone() for h in new_hidden_state_mc_updated)
 
 
-                # --- Backpropagation and Optimization ---
-                # Check if using DeepSpeed
-                if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                    model.backward(total_loss)
-                    model.step()
-                else:
-                    # Standard PyTorch / AMP training step
-                    # Using scaler for mixed precision if enabled
-                    optimizer.zero_grad() # Reset gradients from previous step
-                    # Use scaler.scale() for loss if using AMP
-                    if config.use_half_precision:
-                         scaler.scale(total_loss).backward()
-                         if config.optimizer.max_grad_norm > 0:
-                             # Unscale before clipping
-                             scaler.unscale_(optimizer)
-                             torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                         scaler.step(optimizer)
-                         scaler.update() # Update the scale for the next iteration
-                    else: # Standard training without AMP scaler
-                        total_loss.backward()
-                        if config.optimizer.max_grad_norm > 0:
-                            torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
-                        optimizer.step()
+                # --- Logging for this frame step (optional, can be noisy) ---
+                # For simplicity, we'll log aggregated metrics after all frames in a batch are processed
+                # Or, if you log per frame, remember that global_step also increments per frame.
 
-                    # Scheduler step is typically done *after* optimizer.step()
-                    # and can be done per batch or per epoch.
-                    # If using a step-based scheduler (like OneCycleLR), call it here.
-                    # If using epoch-based, call it outside this loop after iterating through frames.
-                    # Assuming step-based scheduler:
-                    scheduler.step()
+                # --- Optional Debug Saving for the first frame of the first batch ---
+                if log_debug and i == 0 and frame_window_step_idx == 0 :
+                     logger.info(f"Saving debug data at global step {global_step}, frame index {current_frame_in_video_idx}")
+                     # Add mc equivalents if needed
+                     save_debug_step_data(
+                        output_dir=config.output_dir, global_step=global_step, frame_idx=current_frame_in_video_idx,
+                        new_frame_input=current_streaming_frame_orig[0].cpu(),
+                        current_hidden_state_input=tuple(h[0].detach().cpu() for h in curr_hidden_state_orig), # Before update for this step
+                        actual_window_input=current_window_frames_orig[0].cpu(),
+                        stream_embedding_output=stream_embedding_orig[0].cpu(),
+                        target_embedding_output=target_embedding_orig[0].cpu(),
+                        model_state_dict=model_without_ddp.state_dict()
+                    )
+
+            # Average loss over the frames in the batch item
+            # This is important: backward pass should be on the average or sum of losses
+            # from all sliding windows in the batch.
+            # If `total_loss_accumulator` sums losses from all windows,
+            # divide by num_sliding_windows for an average.
+            final_batch_loss = total_loss_accumulator / num_sliding_windows
+
+        # --- Backpropagation and Optimization (after processing all frames in a batch item) ---
+        if hasattr(config, "deepspeed") and config.deepspeed.enable:
+            model.backward(final_batch_loss)
+            model.step()
+        else:
+            optimizer.zero_grad()
+            if config.use_half_precision:
+                scaler.scale(final_batch_loss).backward()
+                if config.optimizer.max_grad_norm > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                final_batch_loss.backward()
+                if config.optimizer.max_grad_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), config.optimizer.max_grad_norm)
+                optimizer.step()
+        scheduler.step() # Assuming step-based scheduler
+
+        # --- Logging Metrics (after optimizer step for the batch) ---
+        # Log the per-batch averaged losses and similarities
+        metric_logger.update(**{f"{media_type}-loss_cosine": loss_orig.item()}) # Log last frame's loss or avg
+        metric_logger.update(**{f"{media_type}-cosine_similarity": cosine_similarity_orig_avg})
+
+        metric_logger.update(**{f"{mc_media_types[0]}-loss_cosine": loss_mc.item()}) # Log last frame's loss or avg for MC
+        metric_logger.update(**{f"{mc_media_types[0]}-cosine_similarity": cosine_similarity_mc_avg})
+
+        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        if hasattr(model_without_ddp, 'temp'):
+            metric_logger.update(temperature=model_without_ddp.temp.item())
+
+        # Increment global_step once per batch item (outer loop iteration)
+        # If you want global_step per frame, move it inside the frame loop.
+        # Current setup: global_step increments per batch from combined_iterator.
+        global_step += 1
+
+        # --- Periodic Evaluation ---
+        if global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
+            logger.info(f"Performing periodic evaluation at global step {global_step}...")
+            avg_sim = evaluate_streaming_similarity(
+                model=model_without_ddp, device=device, transform=inference_transform,
+                video_path=EVAL_VIDEO_PATH, model_max_frames=MODEL_MAX_FRAMES,
+                output_dir=config.output_dir, global_step=global_step
+            )
+            metric_logger.update(eval_avg_sim=avg_sim)
+            logger.info(f"Evaluation at step {global_step} complete. Avg Sim: {avg_sim:.4f}")
+            model.train() # Ensure model is back in training mode
+
+        # --- Log to console and W&B ---
+        if i % log_freq == 0 or i == num_batches - 1: # Log on log_freq and last iteration
+            # Update progress bar with current metrics (manual since not using metric_logger.log_every directly)
+            log_payload = {
+                "lr": optimizer.param_groups[0]["lr"],
+                "loss_orig": loss_orig.item(), # last frame's loss
+                "loss_mc": loss_mc.item(),     # last frame's loss
+                "total_batch_loss": final_batch_loss.item()
+            }
+            if hasattr(model_without_ddp, 'temp'): log_payload["temp"] = model_without_ddp.temp.item()
+            if global_step > 0 and global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
+                log_payload["eval_sim"] = metric_logger.meters['eval_avg_sim'].value
+
+            progress_bar.set_postfix(log_payload)
+
+            # Actual logging via logger
+            if is_main_process(): # Avoid DDP spam
+                logger.info(f"{header} [{i}/{num_batches}] {metric_logger}")
+
+            if is_main_process() and config.wandb.enable: # Log to W&B
+                averaged_logs = metric_logger.get_global_avg_dict() # These are windowed averages
+                log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
+
+        # --- Iteration-based Checkpointing ---
+        if config.get('save_iter', 0) > 0 and global_step % config.save_iter == 0:
+            # ... (checkpointing logic remains largely the same, ensure it's called correctly)
+            logger.info(f"Saving checkpoint at global step {global_step}")
+            # ... (your existing checkpoint saving code) ...
+            if is_main_process() and not (hasattr(config, "deepspeed") and config.deepspeed.enable):
+                save_obj = {
+                    "model": model_without_ddp.state_dict(), # Save unwrapped model
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "scaler": scaler.state_dict() if config.use_half_precision else None,
+                    "config": config, "epoch": epoch, "global_step": global_step,
+                }
+                checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth")
+                torch.save(save_obj, checkpoint_filename)
+                logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
 
 
-                # --- Update Hidden State for the next frame ---
-                # Detach the hidden state to prevent gradients from flowing through the RNN across time steps
-                # Clone to ensure it's a new tensor, not just a view
-                curr_hidden_state = tuple(h.detach().clone() for h in new_hidden_state)
+        # --- Debugging Hooks ---
+        if config.debug and global_step >= 20: # Adjusted for batch-level global_step
+            logger.info("Debug mode: breaking training loop early.")
+            break # Break outer batch loop
 
-
-                # --- Logging Metrics ---
-                # Log loss for the current frame within the window
-                for loss_name in active_loss_names:
-                    loss_value = loss_dict[loss_name].item() # Get scalar value
-                    # Update metric logger for this media type and loss component
-                    metric_logger.update(**{f"{media_type}-{loss_name}": loss_value})
-
-                # Log the batch-wise cosine similarity
-                metric_logger.update(**{f"{media_type}-cosine_similarity": cosine_similarity_avg})
-
-                # Update metric logger with the current learning rate and model temperature
-                metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-                # Assuming model_without_ddp has a 'temp' attribute
-                if hasattr(model_without_ddp, 'temp'):
-                     metric_logger.update(temperature=model_without_ddp.temp.item())
-
-
-                # --- Periodic Evaluation ---
-                # Perform evaluation every EVAL_FREQ_STEPS global steps
-                # Check if it's the main process to avoid redundant evaluations in DDP
-                if global_step % EVAL_FREQ_STEPS == 0:
-                     logger.info(f"Performing periodic evaluation at global step {global_step}...")
-                     # Call the evaluation function
-                     avg_sim = evaluate_streaming_similarity(
-                         model=model_without_ddp, # Pass the unwrapped model
-                         device=device,
-                         transform=inference_transform,
-                         video_path=EVAL_VIDEO_PATH,
-                         model_max_frames=MODEL_MAX_FRAMES,
-                         output_dir=config.output_dir, # Use config output dir for saving plots
-                         global_step=global_step
-                     )
-                     # Log the evaluation result
-                     metric_logger.update(eval_avg_sim=avg_sim)
-                     logger.info(f"Evaluation at step {global_step} complete. Average Similarity: {avg_sim:.4f}")
-                     # Ensure model is back in training mode after evaluation
-                     model.train()
-
-
-                # Log aggregated metrics to Weights & Biases (wandb) periodically if enabled
-                # This logging happens every `log_freq` steps *within* the batch/frame loop
-                if is_main_process() and config.wandb.enable and global_step % log_freq == 0:
-                    # Get the globally averaged metrics from the logger (synchronized across processes if distributed)
-                    # Note: `get_global_avg_dict` should handle synchronization internally
-                    averaged_logs = metric_logger.get_global_avg_dict()
-                    # Send the logs to wandb, associated with the current global step
-                    log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
-
-
-                # Increment the global step counter
-                global_step += 1
-
-                # Log a Divider every 100 steps (this is separate from metric_logger.log_every)
-                if global_step % 100 == 0:
-                    logger.info('─'*80)
-                    logger.info(f"Step: {global_step}")
-                    logger.info(f"Current Frame Index within Batch Video: {new_frame_idx}/{T-1}")
-                    logger.info(f"Batch-wise Cosine Similarity | {cosine_similarity_avg*100:.2f}%")
-                    logger.info(f"Cosine Embedding Loss      | {total_loss.item():.4f}") # Use item() for scalar
-                    logger.info(f"Learning Rate              | {optimizer.param_groups[0]['lr']:.6f}")
-                    if hasattr(model_without_ddp, 'temp'):
-                         logger.info(f"Temperature                | {model_without_ddp.temp.item():.4f}")
-                    # If evaluation just happened, log that as well
-                    if global_step > 0 and global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
-                        logger.info(f"Evaluation Average Sim     | {metric_logger.meters['eval_avg_sim'].value:.4f}")
-                    logger.info('─'*80)
-
-
-                # --- Debugging Hooks ---
-                # Optional early termination conditions for debugging
-                if config.debug and global_step % 20 == 0:
-                    logger.info("Debug mode: breaking training loop early (step condition).")
-                    # Break the inner frame loop
-                    break
-                if config.debug and global_step % (2 * log_freq + 3) == 0: # Another arbitrary break condition
-                     logger.info("Debug mode: breaking training loop early (log freq condition).")
-                     # Break the inner frame loop
-                     break
-
-                # --- Iteration-based Checkpointing ---
-                # Save a checkpoint at specified step intervals if `save_iter` > 0
-                # Checkpoint after incrementing global_step
-                if config.get('save_iter', 0) > 0 and global_step % config.save_iter == 0:
-                    logger.info(f"Saving checkpoint at global step {global_step}")
-                    if hasattr(config, "deepspeed") and config.deepspeed.enable:
-                        # DeepSpeed handles checkpoint saving logic
-                        checkpoint_tag = f"ckpt_iter{global_step:07d}.pth" # Padded step number
-                        # Exclude frozen parameters to save space if needed
-                        model.save_checkpoint(config.output_dir, tag=checkpoint_tag, save_latest=False, exclude_frozen_parameters=True)
-                    elif is_main_process(): # Only the main process saves checkpoints in standard DDP
-                        # Get the model's state dictionary
-                        state_dict = model_without_ddp.state_dict()
-                        # Identify parameters that are frozen (do not require gradients)
-                        param_requires_grad_dict = {
-                            name: param.requires_grad for (name, param) in model_without_ddp.named_parameters()
-                        }
-                        # Create a list of keys corresponding to frozen parameters
-                        keys_to_remove = []
-                        for param_name in state_dict.keys():
-                            # Check if the parameter exists in named_parameters (might not if it's a buffer)
-                            if param_name in param_requires_grad_dict and not param_requires_grad_dict[param_name]:
-                                keys_to_remove.append(param_name)
-                        # Remove frozen parameters from the state dictionary before saving
-                        if keys_to_remove:
-                            logger.info(f"Removing {len(keys_to_remove)} frozen parameters from checkpoint: {keys_to_remove}")
-                            for param_name in keys_to_remove:
-                                # Ensure key exists before deleting
-                                if param_name in state_dict:
-                                     del state_dict[param_name]
-
-                        # Assemble the checkpoint object including model, optimizer, scheduler states, etc.
-                        save_obj = {
-                            "model": state_dict,
-                            "optimizer": optimizer.state_dict(),
-                            "scheduler": scheduler.state_dict(),
-                            "scaler": scaler.state_dict() if config.use_half_precision else None, # Save scaler state if using AMP
-                            "config": config,             # Save config for reproducibility
-                            "epoch": epoch,               # Current epoch
-                            "global_step": global_step,   # Current step
-                        }
-                        # Define the checkpoint filename
-                        checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth") # Padded step number
-                        # Save the checkpoint object to disk
-                        torch.save(save_obj, checkpoint_filename)
-                        logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
-
-            # If debug break happened in the inner loop, break the outer batch loop too
-            if config.debug and (global_step % 20 == 0 or global_step % (2 * log_freq + 3) == 0):
-                 logger.info("Debug mode: breaking batch loop early.")
-                 break # Break the outer batch loop
 
     # --- Training Loop End ---
-
-    # Synchronize metrics across all distributed processes before logging final epoch stats
-    # This is important even if logging happens per step within the loop,
-    # as the final epoch average needs to be accurate.
     metric_logger.synchronize_between_processes()
-    # Log the averaged metrics for the completed epoch
-    logger.info(f"Averaged stats for Epoch [{epoch}] across all processes: {metric_logger.global_avg()}")
-
-    # Log final epoch average metrics to wandb if enabled and on main process
+    logger.info(f"Averaged stats for Epoch [{epoch}]: {metric_logger.global_avg()}")
     if is_main_process() and config.wandb.enable:
-         # Get the globally averaged metrics (already synchronized)
-         averaged_logs = metric_logger.get_global_avg_dict()
-         # Log epoch-level averages. You might use a separate step counter for epochs
-         # or log with the final global_step of the epoch.
-         log_dict_to_wandb(averaged_logs, step=global_step, prefix=f"epoch_{epoch}/")
-         # Also log to train/ prefix at the final step
-         log_dict_to_wandb(averaged_logs, step=global_step, prefix="train/")
+        log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix=f"epoch_{epoch}/")
+        log_dict_to_wandb(metric_logger.get_global_avg_dict(), step=global_step, prefix="train/")
 
-
-    # Return the updated global step count
     return global_step
-
 # Note: You need to ensure the following are defined and imported correctly:
 # - MetricLogger, SmoothedValue (from vision_language_pretraining.common.utils.metric_logger or similar)
 # - MetaLoader_rs, get_media_types (from vision_language_pretraining.data.loader or similar)
@@ -740,6 +663,7 @@ def clone_collate_fn(batch):
 def setup_dataloaders(config, mode="pt"):
     logger.info(f"Creating dataset for {mode}")
     train_datasets = create_dataset(f"{mode}_train", config)
+    mobileclip_train_datasets = create_dataset(f"{mode}_train", config)
     media_types   = get_media_types(train_datasets)
 
     if not config.distributed:
@@ -751,6 +675,15 @@ def setup_dataloaders(config, mode="pt"):
 
     train_loaders = create_loader(
         train_datasets,
+        samplers,
+        batch_size   = batch_size,
+        num_workers  = [config.num_workers] * len(media_types),
+        is_trains    = [True] * len(media_types),
+        collate_fns  = [clone_collate_fn] * len(media_types),   # ← here!
+    )
+
+    mobileclip_train_loaders = create_loader(
+        mobileclip_train_datasets,
         samplers,
         batch_size   = batch_size,
         num_workers  = [config.num_workers] * len(media_types),
@@ -770,7 +703,7 @@ def setup_dataloaders(config, mode="pt"):
     )
 
     test_name2loaders = dict(zip(test_dataset_names, test_loaders))
-    return train_loaders, test_name2loaders, media_types
+    return train_loaders, test_name2loaders, media_types, mobileclip_train_loaders
 
 
 def main(config):
@@ -784,7 +717,7 @@ def main(config):
     setup_seed(config.seed + get_rank())
     device = torch.device(config.device)
 
-    train_loaders, test_name2loaders, train_media_types = setup_dataloaders(
+    train_loaders, test_name2loaders, train_media_types, mobileclip_train_loaders = setup_dataloaders(
         config, mode=config.mode
     )
     num_steps_per_epoch = sum(len(d) for d in train_loaders) * 247 # Using each individual frame for training
@@ -832,6 +765,7 @@ def main(config):
             global_step = train(
                 model,
                 train_loaders,
+                mobileclip_train_loaders
                 optimizer,
                 tokenizer,
                 epoch,
