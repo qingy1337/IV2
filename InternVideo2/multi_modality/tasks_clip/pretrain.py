@@ -175,7 +175,7 @@ def evaluate_streaming_similarity(
             frame_data = all_frames_raw[i] # Get BGR numpy array
 
             # Preprocess single frame -> [1, C, H, W] tensor on device
-            frame_tensor_batch = preprocess_frame(frame_data, transform, device).to(torch.bfloat16) # [1, C, H, W]
+            frame_tensor_batch = preprocess_frame(frame_data, transform, device) # [1, C, H, W]
 
             # Add temporal dimension (T=1) for streaming encoder input [B, C, T=1, H, W]
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2) # [1, C, 1, H, W]
@@ -198,7 +198,7 @@ def evaluate_streaming_similarity(
             current_frame_data_streaming = all_frames_raw[frame_idx] # BGR numpy array
 
             # Preprocess the *current* frame for the streaming encoder
-            frame_tensor_batch = preprocess_frame(current_frame_data_streaming, transform, device).to(torch.bfloat16) # [1, C, H, W]
+            frame_tensor_batch = preprocess_frame(current_frame_data_streaming, transform, device) # [1, C, H, W]
 
             # Add temporal dimension (T=1) for streaming encoder input [B, C, T=1, H, W]
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2) # [1, C, 1, H, W]
@@ -227,7 +227,7 @@ def evaluate_streaming_similarity(
 
             # Preprocess all frames in the window and stack them
             # List of [1, C, H, W] tensors -> Stack -> [MODEL_MAX_FRAMES, 1, C, H, W]
-            list_of_frame_tensors = [preprocess_frame(f, transform, device).to(torch.bfloat16) for f in current_window_frames_data]
+            list_of_frame_tensors = [preprocess_frame(f, transform, device) for f in current_window_frames_data]
             stacked_window_tensor_T_B_C_H_W = torch.stack(list_of_frame_tensors, dim=0) # Shape: [T, B=1, C, H, W]
 
             # Reshape for the full vision encoder [B, C, T, H, W]

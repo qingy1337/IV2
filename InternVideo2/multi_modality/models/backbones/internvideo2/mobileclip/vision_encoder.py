@@ -406,6 +406,8 @@ class VisionTransformer(nn.Module):
         return cls_embedding, image_embedding
 
     def forward(self, x: Tensor, *args, **kwargs) -> Union[Tensor, Dict[str, Tensor]]:
+        if x.dtype != torch.float32:
+            x = x.to(torch.float32)
         # In ViT model, we can return either classifier embeddings (logits) or image embeddings or both.
         # To return the image embeddings, we need to set keyword argument (return_image_embeddings) as True.
         if kwargs.get("return_image_embeddings", False):
