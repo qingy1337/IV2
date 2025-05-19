@@ -574,7 +574,7 @@ def train(
 
         # --- Iteration-based Checkpointing ---
         if config.get('save_iter', 0) > 0 and global_step % config.save_iter == 0:
-            if is_main_process() and config.deepspeed.enable:
+            if is_main_process() and not config.deepspeed.enable:
                 logger.info(f"Saving checkpoint at global step {global_step}")
                 save_obj = {
                     "model": model_without_ddp.state_dict(),
@@ -588,16 +588,13 @@ def train(
                 logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
             else:
                 logger.info(f"Saving checkpoint at global step {global_step}")
-                save_obj = {
-                    "model": model_without_ddp.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "scheduler": scheduler.state_dict(),
-                    "scaler": scaler.state_dict() if config.use_half_precision else None,
-                    "config": config, "epoch": epoch, "global_step": global_step,
-                }
-                checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth")
-                torch.save(save_obj, checkpoint_filename)
-                logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
+                tag = f"ckpt_iter{global_step:07d}"
+                client_state = {"epoch": epoch, "global_step": global_step}
+                # DeepSpeed save call - all ranks participate, only rank 0 writes metadata
+                model.save_checkpoint(config.output_dir, tag=tag, client_state=client_state)
+                # Note: DeepSpeed saves to config.output_dir/tag/ directory.
+                # The logger below might incorrectly refer to a .pth file path.
+                logger.info(f"Saved iteration checkpoint to {config.output_dir}")
 
         # --- Debugging Hooks ---
         if config.debug and global_step >= 20: # Adjusted for batch-level global_step
