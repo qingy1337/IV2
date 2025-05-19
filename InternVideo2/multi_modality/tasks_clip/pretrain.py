@@ -126,7 +126,8 @@ def preprocess_frame(frame_bgr_np, transform, device):
 def evaluate_streaming_similarity(
     model,
     device,
-    transform, # The preprocessing transform
+    streaming_transform, # The preprocessing transform
+    regular_transform,
     video_path,
     model_max_frames,
     output_dir,
@@ -175,7 +176,7 @@ def evaluate_streaming_similarity(
             frame_data = all_frames_raw[i] # Get BGR numpy array
 
             # Preprocess single frame -> [1, C, H, W] tensor on device
-            frame_tensor_batch = preprocess_frame(frame_data, transform, device) # [1, C, H, W]
+            frame_tensor_batch = preprocess_frame(frame_data, streaming_transform, device) # [1, C, H, W]
 
             # Add temporal dimension (T=1) for streaming encoder input [B, C, T=1, H, W]
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2) # [1, C, 1, H, W]
@@ -198,7 +199,7 @@ def evaluate_streaming_similarity(
             current_frame_data_streaming = all_frames_raw[frame_idx] # BGR numpy array
 
             # Preprocess the *current* frame for the streaming encoder
-            frame_tensor_batch = preprocess_frame(current_frame_data_streaming, transform, device) # [1, C, H, W]
+            frame_tensor_batch = preprocess_frame(current_frame_data_streaming, streaming_transform, device) # [1, C, H, W]
 
             # Add temporal dimension (T=1) for streaming encoder input [B, C, T=1, H, W]
             frame_tensor_streaming_input = frame_tensor_batch.unsqueeze(2) # [1, C, 1, H, W]
@@ -227,7 +228,7 @@ def evaluate_streaming_similarity(
 
             # Preprocess all frames in the window and stack them
             # List of [1, C, H, W] tensors -> Stack -> [MODEL_MAX_FRAMES, 1, C, H, W]
-            list_of_frame_tensors = [preprocess_frame(f, transform, device) for f in current_window_frames_data]
+            list_of_frame_tensors = [preprocess_frame(f, regular_transform, device) for f in current_window_frames_data]
             stacked_window_tensor_T_B_C_H_W = torch.stack(list_of_frame_tensors, dim=0) # Shape: [T, B=1, C, H, W]
 
             # Reshape for the full vision encoder [B, C, T, H, W]
@@ -528,10 +529,10 @@ def train(
         if global_step % EVAL_FREQ_STEPS == 0 and is_main_process():
             logger.info(f"Performing periodic evaluation at global step {global_step}...")
             avg_sim = evaluate_streaming_similarity(
-                model=model_without_ddp, device=device, transform=mobileclip_transform,
-                video_path=EVAL_VIDEO_PATH, model_max_frames=MODEL_MAX_FRAMES,
-                output_dir=config.output_dir, global_step=global_step,
-                config = config
+                model=model_without_ddp, device=device, streaming_transform=mobileclip_transform,
+                regular_transform=model_without_ddp.transform, video_path=EVAL_VIDEO_PATH,
+                model_max_frames=MODEL_MAX_FRAMES, output_dir=config.output_dir,
+                global_step=global_step, config = config
             )
             metric_logger.update(eval_avg_sim=avg_sim)
             logger.info(f"Evaluation at step {global_step} complete. Avg Sim: {avg_sim:.4f}")
@@ -562,7 +563,19 @@ def train(
 
         # --- Iteration-based Checkpointing ---
         if config.get('save_iter', 0) > 0 and global_step % config.save_iter == 0:
-            if is_main_process() and not (hasattr(config, "deepspeed") and config.deepspeed.enable):
+            if is_main_process() and config.deepspeed.enable:
+                logger.info(f"Saving checkpoint at global step {global_step}")
+                save_obj = {
+                    "model": model_without_ddp.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "scheduler": scheduler.state_dict(),
+                    "scaler": scaler.state_dict() if config.use_half_precision else None,
+                    "config": config, "epoch": epoch, "global_step": global_step,
+                }
+                checkpoint_filename = join(config.output_dir, f"ckpt_iter{global_step:07d}.pth")
+                torch.save(save_obj, checkpoint_filename)
+                logger.info(f"Saved iteration checkpoint to {checkpoint_filename}")
+            else:
                 logger.info(f"Saving checkpoint at global step {global_step}")
                 save_obj = {
                     "model": model_without_ddp.state_dict(),

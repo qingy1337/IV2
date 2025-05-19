@@ -143,7 +143,7 @@ log_freq = 1
 seed = 42
 
 save_latest = False
-save_iter = 200
+save_iter = 100
 eval_freq_steps = 100
 
 # Evaluation video
