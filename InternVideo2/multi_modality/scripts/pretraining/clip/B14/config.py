@@ -143,8 +143,8 @@ log_freq = 1
 seed = 42
 
 save_latest = False
-save_iter = 10
-eval_freq_steps = 5
+save_iter = 100
+eval_freq_steps = 50
 
 # Evaluation video
 eval_video_repo_id = "qingy2024/backflip_train"
