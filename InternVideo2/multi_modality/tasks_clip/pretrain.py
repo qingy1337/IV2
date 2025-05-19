@@ -127,7 +127,6 @@ def evaluate_streaming_similarity(
     model,
     device,
     streaming_transform, # The preprocessing transform
-    regular_transform,
     video_path,
     model_max_frames,
     output_dir,
@@ -140,6 +139,19 @@ def evaluate_streaming_similarity(
 
     Returns the average cosine similarity over the comparable frames.
     """
+
+    regular_transform = transforms.Compose(
+        [
+            transforms.Resize(
+                (model.module.config.model.vision_encoder.img_size, model.module.config.model.vision_encoder.img_size),
+                interpolation=InterpolationMode.BICUBIC,
+            ),
+            transforms.ToTensor(),
+            transforms.Lambda(lambda x: x.float().div(255.0)),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ]
+    )
+
     # Ensure model is in evaluation mode and on the correct device
     model.eval()
     model.to(device) # Ensure model is on device, though it should be already
@@ -530,8 +542,7 @@ def train(
             logger.info(f"Performing periodic evaluation at global step {global_step}...")
             avg_sim = evaluate_streaming_similarity(
                 model=model_without_ddp, device=device, streaming_transform=mobileclip_transform,
-                regular_transform=model_without_ddp.transform, video_path=EVAL_VIDEO_PATH,
-                model_max_frames=MODEL_MAX_FRAMES, output_dir=config.output_dir,
+                video_path=EVAL_VIDEO_PATH, model_max_frames=MODEL_MAX_FRAMES, output_dir=config.output_dir,
                 global_step=global_step, config = config
             )
             metric_logger.update(eval_avg_sim=avg_sim)

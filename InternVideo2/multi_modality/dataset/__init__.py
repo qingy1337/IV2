@@ -131,7 +131,7 @@ def get_train_transform(config, train_file, use_mobileclip_transform = False, au
             ]
         )
     else:
-        # ======== LSTM Transform ========
+        # ======== Regular Transform ========
         train_transform = transforms.Compose(
             [
                 aug_transform,
