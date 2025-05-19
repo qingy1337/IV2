@@ -163,7 +163,7 @@ def evaluate_streaming_similarity(
         return avg_similarity # Return default if video is too short
 
     # Use torch.no_grad() for inference
-    with torch.no_grad():
+    with torch.autocast("cuda", dtype=torch.bfloat16), torch.no_grad():
         # 2) Initialize streaming model's hidden state for this evaluation run
         # Batch size is 1 for single video inference
         curr_hidden_state_streaming = model.streaming_vision_encoder.init_hidden(batch_size=1, device=device)
