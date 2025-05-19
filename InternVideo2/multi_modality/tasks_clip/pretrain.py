@@ -143,7 +143,7 @@ def evaluate_streaming_similarity(
     regular_transform = transforms.Compose(
         [
             transforms.Resize(
-                (model.module.config.model.vision_encoder.img_size, model.module.config.model.vision_encoder.img_size),
+                (model.config.model.vision_encoder.img_size, model.config.model.vision_encoder.img_size),
                 interpolation=InterpolationMode.BICUBIC,
             ),
             transforms.ToTensor(),
