@@ -106,7 +106,7 @@ def setup_internvideo2(config: dict):
         torch.set_float32_matmul_precision('high')
         model = torch.compile(model)
 
-    model = model.to(torch.device(config.device))
+    model = model.to_empty(device=config.device)
     model_without_ddp = model
 
     if (config.pretrained_path.strip() and (os.path.isfile(config.pretrained_path)) or "s3://" in config.pretrained_path):
@@ -329,6 +329,6 @@ class InternVideo2_Stage2(nn.Module):
                       vid_feat: torch.Tensor,
                       txt_feat: torch.Tensor,
                       top: int=5):
-        label_probs = (100.0 * vid_feat @ txt_feat.T)
+        label_probs = (100.0 * vid_feat @ txt_feat.T).softmax(dim=-1)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels
