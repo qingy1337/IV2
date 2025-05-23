@@ -5,7 +5,7 @@ import io
 import copy
 import torch
 from torch import nn
-from models.backbones.internvideo2 import pretrain_internvideo2_1b_patch14_224
+from models.backbones.internvideo2 import pretrain_internvideo2_1b_patch14_224, pretrain_internvideo2_6b_patch14_224
 from models.backbones.bert.builder import build_bert
 from models.criterions import get_sim
 from models.backbones.internvideo2.pos_embed import interpolate_pos_embed_internvideo2_new
@@ -114,7 +114,7 @@ def setup_internvideo2(config: dict):
     model_without_ddp = model
 
     if (config.pretrained_path.strip() and (os.path.isfile(config.pretrained_path)) or "s3://" in config.pretrained_path):
-        checkpoint = torch.load(config.pretrained_path, map_location="cpu")
+        checkpoint = torch.load(config.pretrained_path, map_location="cpu", weights_only = False)
         try:
             if "model" in checkpoint.keys():
                 state_dict = checkpoint["model"]
@@ -252,7 +252,7 @@ class InternVideo2_Stage2(nn.Module):
         if encoder_name == 'pretrain_internvideo2_1b_patch14_224':
             vision_encoder = pretrain_internvideo2_1b_patch14_224(self.config.model)
         else:
-            raise ValueError(f"Not implemented: {encoder_name}")
+            vision_encoder = pretrain_internvideo2_6b_patch14_224(self.config.model)
 
         # parameters for mask
         img_size = self.config.model.vision_encoder.img_size
