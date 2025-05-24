@@ -68,6 +68,8 @@ def retrieve_text(frames,
     frames_tensor = frames2tensor(frames, fnum=fn, target_size=(size_t, size_t), device=device)
     vid_feat = vlm.get_vid_feat(frames_tensor)
 
+    if log:
+        print(f"Shape of video feats: {vid_feat[0].shape}")
     calculate = False
     for t in texts:
         if t not in tensor_cache:
@@ -77,6 +79,8 @@ def retrieve_text(frames,
         text_feat_d = {}
         text_feat_d = get_text_feat_dict(texts, vlm, text_feat_d)
         text_feats = [text_feat_d[t] for t in texts]
+        if log:
+            print(f"Shape of text feats: {text_feats[0].shape}")
         text_feats_tensor = torch.cat(text_feats, 0)
         for j in range(len(texts)):
             tensor_cache[texts[j]] = text_feats_tensor[j]
@@ -106,7 +110,7 @@ def setup_internvideo2(config: dict):
         torch.set_float32_matmul_precision('high')
         model = torch.compile(model)
 
-    model = model.to(torch.device(config.device))
+    model = model.to_empty(device=config.device)
     model_without_ddp = model
 
     if (config.pretrained_path.strip() and (os.path.isfile(config.pretrained_path)) or "s3://" in config.pretrained_path):
@@ -329,6 +333,6 @@ class InternVideo2_Stage2(nn.Module):
                       vid_feat: torch.Tensor,
                       txt_feat: torch.Tensor,
                       top: int=5):
-        label_probs = (100.0 * vid_feat @ txt_feat.T)
+        label_probs = (100.0 * vid_feat @ txt_feat.T).softmax(dim=-1)
         top_probs, top_labels = label_probs.float().cpu().topk(top, dim=-1)
         return top_probs, top_labels

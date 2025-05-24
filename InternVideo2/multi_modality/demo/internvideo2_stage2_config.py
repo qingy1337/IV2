@@ -40,6 +40,7 @@ model = dict(
         # backbone
         name="pretrain_internvideo2_1b_patch14_224",
         img_size=224, 
+        in_chans=3,
         num_frames="${num_frames}",
         tubelet_size=1,
         patch_size=14, 
@@ -74,6 +75,23 @@ model = dict(
     embed_dim=512,
     temp=0.07,
     find_unused_parameters=False
+)
+
+criterion = dict(
+    clip_loss_ratio=[
+      1.0,
+      1.0
+    ],
+    distill_final_features=True,
+    loss_weight=dict(
+      mlm= 1.0,
+      mvm= 0.0,
+      uta= 0.0,
+      vtc= 1.0,
+      vtm= 1.0
+    ),
+    mlm_masking_prob= 0.5,
+    vtm_hard_neg= True,
 )
 
 evaluate = True
