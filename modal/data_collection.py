@@ -41,15 +41,19 @@ image = image.run_commands(
     "huggingface-cli download OpenGVLab/InternVideo2-Stage2_1B-224p-f4 --local-dir /root/",
 )
 
-# Clone the InternVideo2 Repository
-image = image.run_commands(
-    "cd /root/ && git clone https://github.com/qingy1337/IV2.git",
-)
+# # Clone the InternVideo2 Repository
+# image = image.run_commands(
+#     "cd /root/ && git clone https://github.com/qingy1337/IV2.git",
+# )
 
 image = image.run_commands(
     "pip install opencv-python tabulate",
     "apt-get update",
     "apt-get install ffmpeg libsm6 libxext6 -y"
+)
+
+image = image.run_commands(
+    "curl -s https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt | pip install -r -"
 )
 # ---------
 
@@ -61,16 +65,6 @@ app = modal.App(image=image, name="InternVideo2 Experiments")
 def runwithgpu():
     import os
     import subprocess
-
-    os.chdir("/root/IV2")
-
-    commands = """
-    git pull
-    pip install -r reqs.txt
-    """.strip().splitlines()
-
-    for line in commands:
-        subprocess.run(line.strip().split(), check = True)
 
     os.chdir("/root/")
 
