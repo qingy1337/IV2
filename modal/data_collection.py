@@ -52,8 +52,10 @@ image = image.run_commands(
     "apt-get install ffmpeg libsm6 libxext6 -y"
 )
 
+# Install requirements from IV2 repo.
 image = image.run_commands(
-    "curl -s https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt | pip install -r -"
+    "curl -s -o reqs.txt https://raw.githubusercontent.com/qingy1337/IV2/refs/heads/main/reqs.txt && pip install -r reqs.txt",
+    "rm reqs.txt"
 )
 # ---------
 
