@@ -9,7 +9,7 @@ import torch.utils.checkpoint as checkpoint
 from functools import partial
 from einops import rearrange
 
-from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed, interpolate_pos_embed_internvideo2, interpolate_pos_embed_internvideo2_new
+from .pos_embed import get_3d_sincos_pos_embed, get_2d_sincos_pos_embed, get_1d_sincos_pos_embed, interpolate_pos_embed_internvideo2
 
 
 class CrossAttention(nn.Module):
@@ -693,7 +693,7 @@ def pretrain_internvideo2_1b_patch14_224(config):
 
     if config.vision_encoder.pretrained is not None:
         state_dict = torch.load(config.vision_encoder.pretrained, map_location='cpu')
-        interpolate_pos_embed_internvideo2_new(state_dict, model, orig_t_size=4)
+        interpolate_pos_embed_internvideo2(state_dict, model, orig_t_size=4)
         message = model.load_state_dict(state_dict, strict=False)
     return model
 
@@ -727,7 +727,7 @@ def pretrain_internvideo2_6b_patch14_224(config):
 
     if config.vision_encoder.pretrained is not None:
         state_dict = torch.load(config.vision_encoder.pretrained, map_location='cpu')
-        interpolate_pos_embed_internvideo2_new(state_dict, model, orig_t_size=8)
+        interpolate_pos_embed_internvideo2(state_dict, model, orig_t_size=8)
         msg = model.load_state_dict(state_dict, strict=False)
     return model
 
