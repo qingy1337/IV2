@@ -72,26 +72,17 @@ def runwithgpu():
 
     # Generate a secure random token for JupyterLab access authentication.
     token = 'tesslate'
-    # Set up port forwarding to access JupyterLab running inside the Modal container from the local machine.
-    with modal.forward(8888) as tunnel:
-        # Construct the URL to access JupyterLab, including the generated token.
-        url = tunnel.url + "/?token=" + token
-        print('-'*50 + '\n' + f"{url}\n"+'-'*50) # Print the URL to the console, making it easy to access JupyterLab in a browser.
-        # Start JupyterLab server with specific configurations.
-        subprocess.run(
-            [
-                "jupyter", # Command to execute JupyterLab.
-                "lab", # Start JupyterLab interface.
-                "--no-browser", # Prevent JupyterLab from trying to open a browser automatically.
-                "--allow-root", # Allow JupyterLab to be run as root user inside the container.
-                "--ip=0.0.0.0", # Bind JupyterLab to all network interfaces, making it accessible externally.
-                "--port=8888", # Specify the port for JupyterLab to listen on.
-                "--LabApp.allow_origin='*'", # Allow requests from any origin (for easier access from different networks).
-                "--LabApp.allow_remote_access=1", # Allow remote connections to JupyterLab.
-            ],
-            env={**os.environ, "JUPYTER_TOKEN": token, "SHELL": "/bin/bash"}, # Set environment variables, including the authentication token and shell.
-            stderr=subprocess.DEVNULL, # Suppress standard error output from JupyterLab for cleaner logs.
-        )
+
+    os.system('huggingface-cli download qingy2024/InternVideo2-Data InternVideo2_6B_V5_ACT75_eval.py --local-dir /root/ --repo-type dataset')
+
+    command = "cd /root/ && python3 InternVideo2_6B_V5_ACT75_eval.py --num_frames 8"
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+
+    print("STDOUT:")
+    print(stdout.decode())
+    print("STDERR:")
+    print(stderr.decode())
 
 # Define a local entrypoint function for the Modal application.
 @app.local_entrypoint()
